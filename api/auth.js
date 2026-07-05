@@ -9,11 +9,18 @@ function send(res, status, body) {
 }
 
 function normalizeUsername(username) {
-  return String(username || '').trim().toLowerCase();
+  return String(username || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/[^a-z0-9._-]/g, '')
+    .slice(0, 60);
 }
 
 function validateUsername(username) {
-  return /^[a-z0-9._-]{3,40}$/.test(username);
+  return typeof username === 'string' && username.length >= 3 && username.length <= 60;
 }
 
 function hashPassword(password, salt) {
@@ -30,7 +37,7 @@ async function redisCommand(command) {
   const token = process.env.UPSTASH_REDIS_REST_TOKEN;
 
   if (!url || !token) {
-    const error = new Error('Variáveis UPSTASH_REDIS_REST_URL e UPSTASH_REDIS_REST_TOKEN não configuradas.');
+    const error = new Error('Upstash não configurado na Vercel. Verifique as variáveis UPSTASH_REDIS_REST_URL e UPSTASH_REDIS_REST_TOKEN.');
     error.statusCode = 500;
     throw error;
   }
@@ -68,7 +75,7 @@ module.exports = async function handler(req, res) {
     const password = String(body.password || '');
 
     if (!validateUsername(username)) {
-      return send(res, 400, { ok:false, error:'Usuário inválido. Use no mínimo 3 caracteres, sem espaços.' });
+      return send(res, 400, { ok:false, error:'Usuário inválido. Use pelo menos 3 letras ou números.' });
     }
 
     if (password.length < 4) {

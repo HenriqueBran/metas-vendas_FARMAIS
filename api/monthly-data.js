@@ -20,7 +20,7 @@ async function redisCommand(command) {
   const token = process.env.UPSTASH_REDIS_REST_TOKEN;
 
   if (!url || !token) {
-    const error = new Error('Variáveis UPSTASH_REDIS_REST_URL e UPSTASH_REDIS_REST_TOKEN não configuradas.');
+    const error = new Error('Upstash não configurado na Vercel. Verifique as variáveis UPSTASH_REDIS_REST_URL e UPSTASH_REDIS_REST_TOKEN.');
     error.statusCode = 500;
     throw error;
   }

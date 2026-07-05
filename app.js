@@ -29,6 +29,28 @@ function parseVal(v){
   return Number(s) || 0;
 }
 
+const AUTH_SESSION_KEY = 'farmaisAuthSession';
+
+function normalizeClientUsername(username){
+  return String(username || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g,'')
+    .replace(/\s+/g,'-')
+    .replace(/[^a-z0-9._-]/g,'')
+    .slice(0,60) || 'sem-login';
+}
+
+function getCurrentUsername(){
+  try{
+    const session = JSON.parse(localStorage.getItem(AUTH_SESSION_KEY) || 'null');
+    return session && session.username ? normalizeClientUsername(session.username) : 'sem-login';
+  }catch{
+    return 'sem-login';
+  }
+}
+
 function currentMonth(){
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
@@ -148,6 +170,7 @@ async function apiRequest(method, month, data){
   }
 
   const username = getCurrentUsername();
+  if(username === 'sem-login') return null;
   const response = await fetch(`/api/monthly-data?month=${encodeURIComponent(month)}&user=${encodeURIComponent(username)}`, options);
   if (!response.ok) {
     const errorText = await response.text().catch(()=>'');
@@ -177,6 +200,7 @@ async function saveToUpstash(){
 }
 
 function scheduleCloudSave(){
+  if(getCurrentUsername() === 'sem-login') return;
   clearTimeout(cloudSaveTimer);
   cloudSaveTimer = setTimeout(()=>saveToUpstash(), 700);
 }
@@ -331,16 +355,7 @@ const registerMessage = document.getElementById('registerMessage');
 const showRegister = document.getElementById('showRegister');
 const showLogin = document.getElementById('showLogin');
 const logoutBtn = document.getElementById('logoutBtn');
-const AUTH_SESSION_KEY = 'farmaisAuthSession';
 
-function getCurrentUsername(){
-  try{
-    const session = JSON.parse(localStorage.getItem(AUTH_SESSION_KEY) || 'null');
-    return session && session.username ? String(session.username).trim().toLowerCase() : 'sem-login';
-  }catch{
-    return 'sem-login';
-  }
-}
 
 function setAuthMessage(el, message, success=false){
   if(!el) return;
@@ -374,30 +389,47 @@ function lockApp(){
 }
 
 async function authRequest(action, username, password){
-  if(location.protocol === 'file:'){
+  const safeUsername = normalizeClientUsername(username);
+
+  function localAuth(){
     const users = JSON.parse(localStorage.getItem('farmaisLocalUsers') || '{}');
     if(action === 'register'){
-      if(users[username]) throw new Error('Esse usuário já existe.');
-      users[username] = {password};
+      if(users[safeUsername]) throw new Error('Esse usuário já existe neste navegador.');
+      users[safeUsername] = {password};
       localStorage.setItem('farmaisLocalUsers', JSON.stringify(users));
-      return {ok:true};
+      return {ok:true, user:{username:safeUsername}, local:true};
     }
     if(action === 'login'){
-      if(!users[username] || users[username].password !== password) throw new Error('Usuário ou senha incorretos.');
-      return {ok:true, user:{username}};
+      if(!users[safeUsername] || users[safeUsername].password !== password) throw new Error('Usuário ou senha incorretos.');
+      return {ok:true, user:{username:safeUsername}, local:true};
     }
+    throw new Error('Ação inválida.');
   }
 
-  const response = await fetch('/api/auth', {
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({action, username, password})
-  });
+  if(location.protocol === 'file:'){
+    return localAuth();
+  }
 
-  const data = await response.json().catch(()=>({}));
+  let response;
+  try{
+    response = await fetch('/api/auth', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({action, username:safeUsername, password})
+    });
+  }catch(err){
+    throw new Error('Não consegui conectar com a API da Vercel. Verifique se o deploy terminou.');
+  }
+
+  const rawText = await response.text();
+  let data = {};
+  try{ data = rawText ? JSON.parse(rawText) : {}; }catch{}
+
   if(!response.ok || !data.ok){
-    throw new Error(data.error || 'Não foi possível concluir a operação.');
+    const msg = data.error || rawText || `Erro ${response.status}`;
+    throw new Error(msg);
   }
+
   return data;
 }
 
@@ -417,7 +449,7 @@ loginForm?.addEventListener('submit', async e=>{
   setAuthMessage(loginMessage, 'Entrando...');
   try{
     await authRequest('login', username, password);
-    localStorage.setItem(AUTH_SESSION_KEY, JSON.stringify({username, loggedAt:new Date().toISOString()}));
+    localStorage.setItem(AUTH_SESSION_KEY, JSON.stringify({username:normalizeClientUsername(username), loggedAt:new Date().toISOString()}));
     setAuthMessage(loginMessage, 'Login realizado com sucesso.', true);
     unlockApp();
 
@@ -625,6 +657,4 @@ switchScreen('resultados');
 if(isLoggedIn()){
   const monthToLoad = localStorage.getItem(`${STORAGE_PREFIX}:currentMonth:${getCurrentUsername()}`) || state.settings.month || currentMonth();
   loadMonth(monthToLoad).then(()=>initCloudSync());
-}else{
-  initCloudSync();
 }

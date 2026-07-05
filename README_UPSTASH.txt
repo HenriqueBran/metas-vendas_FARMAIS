@@ -32,3 +32,23 @@ DADOS POR USUÁRIO
 - Exemplo de chave no Upstash:
   farmais-tiete:metas-vendas:data:nadia:2026-07
 - Quando o usuário fecha o navegador e loga novamente, o sistema carrega automaticamente os dados salvos daquele usuário e mês.
+
+
+ERRO AO CRIAR LOGIN
+
+Se aparecer erro ao criar usuário na Vercel, confira:
+1. Se as variáveis de ambiente existem no projeto:
+   UPSTASH_REDIS_REST_URL
+   UPSTASH_REDIS_REST_TOKEN
+   APP_STORAGE_PREFIX
+
+2. Depois de adicionar ou alterar variáveis, faça Redeploy na Vercel.
+
+3. Se o erro for "Upstash não configurado", o problema está nas variáveis da Vercel.
+
+4. Use usuário simples, por exemplo:
+   admin
+   nadia
+   farmais-tiete
+
+Esta versão também aceita nomes com espaço; eles são convertidos automaticamente para chave segura.
