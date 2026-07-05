@@ -62,15 +62,15 @@ function employeeId(){
 }
 
 const defaultState = {
-  settings:{month:currentMonth(), workDays:26, monthlyGoal:150000, prize:0},
+  settings:{month:currentMonth(), workDays:25, monthlyGoal:145000, prize:1500},
   employees:[
-    {id:employeeId(), name:'Cristiana', role:'Balconista', percent:15},
-    {id:employeeId(), name:'Genivaldo', role:'Farmacêutico', percent:15},
-    {id:employeeId(), name:'Nadia', role:'Farmacêutico', percent:15},
-    {id:employeeId(), name:'Arnobio', role:'Farmacêutico', percent:15},
-    {id:employeeId(), name:'Lucas', role:'Atendente', percent:15},
-    {id:employeeId(), name:'Nalva', role:'Atendente', percent:15},
-    {id:employeeId(), name:'Fernanda', role:'Atendente', percent:15}
+    {id:employeeId(), name:'Cristiana', role:'Balconista', percent:15, target:20715, daily:828.57},
+    {id:employeeId(), name:'Genivaldo', role:'Farmacêutico', percent:15, target:20715, daily:828.57},
+    {id:employeeId(), name:'Nadia', role:'Farmacêutico', percent:15, target:20715, daily:828.57},
+    {id:employeeId(), name:'Arnobio', role:'Farmacêutico', percent:15, target:20715, daily:828.57},
+    {id:employeeId(), name:'Lucas', role:'Atendente', percent:15, target:20715, daily:828.57},
+    {id:employeeId(), name:'Nalva', role:'Atendente', percent:15, target:20715, daily:828.57},
+    {id:employeeId(), name:'Fernanda', role:'Atendente', percent:15, target:20715, daily:828.57}
   ],
   sales:{},
   updatedAt:null
@@ -98,16 +98,32 @@ function normalizeState(raw, month){
     sales:data.sales && typeof data.sales === 'object' ? data.sales : {},
     updatedAt:data.updatedAt || null
   };
+
   normalized.settings.month = month || normalized.settings.month || currentMonth();
-  normalized.settings.workDays = parseVal(normalized.settings.workDays) || 26;
+  normalized.settings.workDays = parseVal(normalized.settings.workDays) || 25;
   normalized.settings.monthlyGoal = parseVal(normalized.settings.monthlyGoal);
   normalized.settings.prize = parseVal(normalized.settings.prize);
-  normalized.employees = normalized.employees.map(e=>({
-    id:e.id || employeeId(),
-    name:e.name || 'Funcionário',
-    role:e.role || '',
-    percent:parseVal(e.percent)
-  }));
+
+  const employeeCount = Math.max(1, normalized.employees.length);
+  const fallbackTarget = normalized.settings.monthlyGoal ? (normalized.settings.monthlyGoal / employeeCount) : 0;
+  const fallbackDaily = fallbackTarget / Math.max(1, normalized.settings.workDays);
+
+  normalized.employees = normalized.employees.map(e=>{
+    const targetValue = e.target ?? e.metaIndividual ?? e.individualTarget ?? e.goal;
+    const dailyValue = e.daily ?? e.metaDiaria ?? e.dailyGoal;
+    const target = targetValue === undefined || targetValue === null || targetValue === '' ? fallbackTarget : parseVal(targetValue);
+    const daily = dailyValue === undefined || dailyValue === null || dailyValue === '' ? fallbackDaily : parseVal(dailyValue);
+
+    return {
+      id:e.id || employeeId(),
+      name:e.name || 'Funcionário',
+      role:e.role || '',
+      percent:parseVal(e.percent),
+      target,
+      daily
+    };
+  });
+
   return normalized;
 }
 
@@ -288,8 +304,12 @@ function ensureDays(){
     saveLocal();
   }
 }
-function employeeTarget(e){return state.settings.monthlyGoal*(parseVal(e.percent)/100)}
-function employeeDaily(e){return employeeTarget(e)/Math.max(1,state.settings.workDays)}
+function employeeTarget(e){return parseVal(e.target)}
+function employeeDaily(e){return parseVal(e.daily)}
+function dailyCellValue(v){
+  if(v === undefined || v === null || v === 0 || v === '0') return '';
+  return String(v);
+}
 function employeeSold(id){return Object.values(state.sales).reduce((sum,row)=>sum+parseVal(row[id]),0)}
 function totalSold(){return state.employees.reduce((sum,e)=>sum+employeeSold(e.id),0)}
 function launchedDays(){return Object.values(state.sales).filter(row=>Object.values(row).some(v=>parseVal(v)>0)).length}
@@ -553,14 +573,53 @@ function renderEmployees(){
   employeeRows.innerHTML='';
   state.employees.forEach(e=>{
     const tr=document.createElement('tr');
-    tr.innerHTML=`<td><input value="${e.name}" data-k="name"></td><td><input value="${e.role}" data-k="role"></td><td><input value="${e.percent}" data-k="percent"></td><td>${brl(employeeTarget(e))}</td><td>${brl(employeeDaily(e))}</td><td><button class="remove" type="button">Remover</button></td>`;
-    tr.querySelectorAll('input').forEach(inp=>inp.oninput=ev=>{e[ev.target.dataset.k]=ev.target.dataset.k==='percent'?parseVal(ev.target.value):ev.target.value;save()});
-    tr.querySelector('.remove').onclick=()=>{if(confirm('Remover este funcionário?')){state.employees=state.employees.filter(x=>x.id!==e.id);Object.values(state.sales).forEach(row=>delete row[e.id]);save();}};
+    tr.innerHTML=`
+      <td><input value="${e.name}" data-k="name"></td>
+      <td><input value="${e.role}" data-k="role"></td>
+      <td><input inputmode="decimal" value="${String(e.percent).replace('.', ',')}" data-k="percent"></td>
+      <td><input inputmode="decimal" value="${formatInputDecimal(employeeTarget(e))}" data-k="target"></td>
+      <td><input inputmode="decimal" value="${formatInputDecimal(employeeDaily(e))}" data-k="daily"></td>
+      <td><button class="remove" type="button">Remover</button></td>
+    `;
+
+    tr.querySelectorAll('input').forEach(inp=>{
+      inp.oninput=ev=>{
+        const key=ev.target.dataset.k;
+        if(key==='name' || key==='role'){
+          e[key]=ev.target.value;
+          saveLocal();
+          scheduleCloudSave();
+          renderDaily();
+        }else{
+          e[key]=parseVal(ev.target.value);
+          saveLocal();
+          scheduleCloudSave();
+          renderResults();
+        }
+      };
+
+      inp.onblur=ev=>{
+        const key=ev.target.dataset.k;
+        if(key==='percent') ev.target.value=String(parseVal(e.percent)).replace('.', ',');
+        if(key==='target') ev.target.value=formatInputDecimal(employeeTarget(e));
+        if(key==='daily') ev.target.value=formatInputDecimal(employeeDaily(e));
+      };
+    });
+
+    tr.querySelector('.remove').onclick=()=>{
+      if(confirm('Remover este funcionário?')){
+        state.employees=state.employees.filter(x=>x.id!==e.id);
+        Object.values(state.sales).forEach(row=>delete row[e.id]);
+        save();
+      }
+    };
+
     employeeRows.appendChild(tr);
   });
 }
 addEmployee.onclick=()=>{
-  const emp={id:crypto.randomUUID(),name:'Novo funcionário',role:'Cargo',percent:0};
+  const targetDefault = state.settings.monthlyGoal / Math.max(1, state.employees.length + 1);
+  const emp={id:employeeId(),name:'Novo funcionário',role:'Cargo',percent:0,target:targetDefault,daily:targetDefault/Math.max(1,state.settings.workDays)};
   state.employees.push(emp);
   Object.values(state.sales).forEach(row=>row[emp.id]=0);
   save();
@@ -581,14 +640,24 @@ function renderDaily(){
   dailyBody.innerHTML='';
   Object.keys(state.sales).map(Number).sort((a,b)=>a-b).forEach(day=>{
     const tr=document.createElement('tr');
-    tr.innerHTML=`<td>${String(day).padStart(2,'0')}/${state.settings.month.split('-')[1]}</td>`+state.employees.map(e=>`<td><input inputmode="decimal" value="${state.sales[day][e.id]||''}" data-day="${day}" data-id="${e.id}" placeholder="0,00"></td>`).join('');
-    tr.querySelectorAll('input').forEach(inp=>inp.oninput=ev=>{state.sales[ev.target.dataset.day][ev.target.dataset.id]=parseVal(ev.target.value);saveLocal();scheduleCloudSave();renderResults();});
+    tr.innerHTML=`<td>${String(day).padStart(2,'0')}/${state.settings.month.split('-')[1]}</td>`+
+      state.employees.map(e=>`<td><input value="${dailyCellValue(state.sales[day][e.id])}" data-day="${day}" data-id="${e.id}" placeholder="0,00"></td>`).join('');
+
+    tr.querySelectorAll('input').forEach(inp=>inp.oninput=ev=>{
+      state.sales[ev.target.dataset.day][ev.target.dataset.id]=ev.target.value;
+      saveLocal();
+      scheduleCloudSave();
+      renderResults();
+    });
+
     dailyBody.appendChild(tr);
   });
 }
-
-// Lógica da premiação igual à planilha:
-// premiação do funcionário = venda do funcionário / venda total da loja * premiação configurada.
+// Lógica igual à planilha:
+// total vendido = soma dos lançamentos numéricos; textos como FOLGA/atestado valem zero.
+// % da meta = vendido do funcionário / meta individual.
+// participação = vendido do funcionário / total vendido da loja.
+// premiação = participação * premiação configurada.
 function renderResults(){
   const sold=totalSold(), goal=state.settings.monthlyGoal, missing=Math.max(goal-sold,0), attainment=goal?sold/goal*100:0;
   const days=state.settings.workDays || daysInMonth(state.settings.month);
@@ -603,7 +672,7 @@ function renderResults(){
   progressBar.style.width=Math.min(attainment,100)+'%';
   statusMeta.textContent=attainment>=100?'Meta batida':'Em andamento';
   metaDiariaLoja.textContent=brl(goal/Math.max(1,state.settings.workDays));
-  diasLancados.textContent=`${Math.min(days, launched || days)} / ${days}`;
+  diasLancados.textContent=`${launched} / ${days}`;
   projecaoMes.textContent=brl(projection || sold);
   premiacaoProjetada.textContent=brl(totalPrize);
   const percentSum=state.employees.reduce((s,e)=>s+parseVal(e.percent),0);

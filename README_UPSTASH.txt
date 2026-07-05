@@ -52,3 +52,13 @@ Se aparecer erro ao criar usuário na Vercel, confira:
    farmais-tiete
 
 Esta versão também aceita nomes com espaço; eles são convertidos automaticamente para chave segura.
+
+
+LÓGICA DA PLANILHA
+- Meta individual e meta diária são campos próprios por funcionário, como na calculadora.
+- Percentual (%) fica cadastrado, mas não é usado para calcular a meta individual.
+- Total vendido por funcionário soma somente valores numéricos; textos como FOLGA, folga e atestado valem zero.
+- % atingido = vendido do funcionário / meta individual.
+- Participação = vendido do funcionário / total vendido da loja.
+- Premiação = participação * premiação configurada.
+- Percentual geral atingido = total vendido da loja / meta do mês.
