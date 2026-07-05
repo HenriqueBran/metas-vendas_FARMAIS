@@ -824,3 +824,11 @@ body.auth-locked .auth-screen{
 .side-nav .nav span:last-child{
   font-weight:600!important;
 }
+
+/* Campos calculados automaticamente */
+.auto-field{
+  background:#f3f7fb!important;
+  color:#005095!important;
+  font-weight:700!important;
+  cursor:not-allowed!important;
+}

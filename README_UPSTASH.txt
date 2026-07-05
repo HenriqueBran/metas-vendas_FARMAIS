@@ -62,3 +62,9 @@ LÓGICA DA PLANILHA
 - Participação = vendido do funcionário / total vendido da loja.
 - Premiação = participação * premiação configurada.
 - Percentual geral atingido = total vendido da loja / meta do mês.
+
+
+META AUTOMÁTICA
+- Meta individual = Meta do mês x (percentual do funcionário / soma dos percentuais).
+- Meta diária = Meta individual / Dias de trabalho.
+- Ao alterar Meta do mês, Dias de trabalho, Premiação projetada ou Percentual (%), o sistema recalcula automaticamente.

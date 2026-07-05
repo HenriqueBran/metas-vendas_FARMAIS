@@ -304,6 +304,19 @@ function ensureDays(){
     saveLocal();
   }
 }
+function recalcEmployeeGoals(){
+  const totalPercent = state.employees.reduce((sum,e)=>sum+parseVal(e.percent),0);
+  const count = Math.max(1, state.employees.length);
+  const days = Math.max(1, parseVal(state.settings.workDays) || 1);
+
+  state.employees.forEach(e=>{
+    const share = totalPercent > 0 ? (parseVal(e.percent) / totalPercent) : (1 / count);
+    const target = (parseVal(state.settings.monthlyGoal) || 0) * share;
+    e.target = Number(target.toFixed(2));
+    e.daily = Number((target / days).toFixed(2));
+  });
+}
+
 function employeeTarget(e){return parseVal(e.target)}
 function employeeDaily(e){return parseVal(e.daily)}
 function dailyCellValue(v){
@@ -540,11 +553,13 @@ function bindSettings(){
 
   diasTrabalho.oninput=e=>{
     state.settings.workDays=parseVal(e.target.value);
+    recalcEmployeeGoals();
     save();
   };
 
   metaMes.oninput=e=>{
     state.settings.monthlyGoal=parseVal(e.target.value);
+    recalcEmployeeGoals();
     saveLocal();
     scheduleCloudSave();
     renderEmployees();
@@ -552,24 +567,33 @@ function bindSettings(){
   };
   metaMes.onblur=()=>{
     metaMes.value=formatInputDecimal(state.settings.monthlyGoal);
+    recalcEmployeeGoals();
     saveLocal();
     scheduleCloudSave();
+    renderEmployees();
+    renderResults();
   };
 
   premiacao.oninput=e=>{
     state.settings.prize=parseVal(e.target.value);
+    recalcEmployeeGoals();
     saveLocal();
     scheduleCloudSave();
+    renderEmployees();
     renderResults();
   };
   premiacao.onblur=()=>{
     premiacao.value=formatInputDecimal(state.settings.prize);
+    recalcEmployeeGoals();
     saveLocal();
     scheduleCloudSave();
+    renderEmployees();
+    renderResults();
   };
 }
 
 function renderEmployees(){
+  recalcEmployeeGoals();
   employeeRows.innerHTML='';
   state.employees.forEach(e=>{
     const tr=document.createElement('tr');
@@ -577,32 +601,44 @@ function renderEmployees(){
       <td><input value="${e.name}" data-k="name"></td>
       <td><input value="${e.role}" data-k="role"></td>
       <td><input inputmode="decimal" value="${String(e.percent).replace('.', ',')}" data-k="percent"></td>
-      <td><input inputmode="decimal" value="${formatInputDecimal(employeeTarget(e))}" data-k="target"></td>
-      <td><input inputmode="decimal" value="${formatInputDecimal(employeeDaily(e))}" data-k="daily"></td>
+      <td><input class="auto-field" inputmode="decimal" value="${formatInputDecimal(employeeTarget(e))}" data-k="target" readonly title="Calculado automaticamente pela meta do mês e percentual"></td>
+      <td><input class="auto-field" inputmode="decimal" value="${formatInputDecimal(employeeDaily(e))}" data-k="daily" readonly title="Calculado automaticamente pela meta individual dividida pelos dias de trabalho"></td>
       <td><button class="remove" type="button">Remover</button></td>
     `;
 
     tr.querySelectorAll('input').forEach(inp=>{
       inp.oninput=ev=>{
         const key=ev.target.dataset.k;
+
         if(key==='name' || key==='role'){
           e[key]=ev.target.value;
           saveLocal();
           scheduleCloudSave();
           renderDaily();
-        }else{
-          e[key]=parseVal(ev.target.value);
+          renderResults();
+          return;
+        }
+
+        if(key==='percent'){
+          e.percent=parseVal(ev.target.value);
+          recalcEmployeeGoals();
           saveLocal();
           scheduleCloudSave();
+          renderEmployees();
           renderResults();
         }
       };
 
       inp.onblur=ev=>{
         const key=ev.target.dataset.k;
-        if(key==='percent') ev.target.value=String(parseVal(e.percent)).replace('.', ',');
-        if(key==='target') ev.target.value=formatInputDecimal(employeeTarget(e));
-        if(key==='daily') ev.target.value=formatInputDecimal(employeeDaily(e));
+        if(key==='percent'){
+          ev.target.value=String(parseVal(e.percent)).replace('.', ',');
+          recalcEmployeeGoals();
+          saveLocal();
+          scheduleCloudSave();
+          renderEmployees();
+          renderResults();
+        }
       };
     });
 
@@ -610,6 +646,7 @@ function renderEmployees(){
       if(confirm('Remover este funcionário?')){
         state.employees=state.employees.filter(x=>x.id!==e.id);
         Object.values(state.sales).forEach(row=>delete row[e.id]);
+        recalcEmployeeGoals();
         save();
       }
     };
@@ -618,10 +655,10 @@ function renderEmployees(){
   });
 }
 addEmployee.onclick=()=>{
-  const targetDefault = state.settings.monthlyGoal / Math.max(1, state.employees.length + 1);
-  const emp={id:employeeId(),name:'Novo funcionário',role:'Cargo',percent:0,target:targetDefault,daily:targetDefault/Math.max(1,state.settings.workDays)};
+  const emp={id:employeeId(),name:'Novo funcionário',role:'Cargo',percent:0,target:0,daily:0};
   state.employees.push(emp);
   Object.values(state.sales).forEach(row=>row[emp.id]=0);
+  recalcEmployeeGoals();
   save();
 };
 
@@ -659,6 +696,7 @@ function renderDaily(){
 // participação = vendido do funcionário / total vendido da loja.
 // premiação = participação * premiação configurada.
 function renderResults(){
+  recalcEmployeeGoals();
   const sold=totalSold(), goal=state.settings.monthlyGoal, missing=Math.max(goal-sold,0), attainment=goal?sold/goal*100:0;
   const days=state.settings.workDays || daysInMonth(state.settings.month);
   const launched=launchedDays();
@@ -718,7 +756,7 @@ function renderResults(){
   });
 }
 
-function renderAll(){ensureDays();renderSettings();renderEmployees();renderDaily();renderResults();}
+function renderAll(){ensureDays();recalcEmployeeGoals();renderSettings();renderEmployees();renderDaily();renderResults();}
 bindSettings();
 renderAll();
 switchScreen('resultados');
