@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Farmais Tietê | Metas e Vendas</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <aside id="sidebar" class="sidebar">
+    <div class="brand">
+      <img class="brand-logo" src="logo.png" alt="Farmais Tietê" />
+      <strong>Metas &amp; Vendas</strong>
+      <span>Controle mensal da equipe</span>
+    </div>
+
+    <nav class="side-nav" aria-label="Seções">
+      <button class="nav active" data-screen="resultados" type="button">
+        <span class="nav-ico bars"></span><span>Resultados</span>
+      </button>
+      <button class="nav" data-screen="metas" type="button">
+        <svg class="nav-svg bi bi-bullseye" xmlns="http://www.w3.org/2000/svg" width="32" height="32" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true">
+          <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14m0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16"/>
+          <path d="M8 13A5 5 0 1 1 8 3a5 5 0 0 1 0 10m0 1A6 6 0 1 0 8 2a6 6 0 0 0 0 12"/>
+          <path d="M8 11A3 3 0 1 1 8 5a3 3 0 0 1 0 6m0 1A4 4 0 1 0 8 4a4 4 0 0 0 0 8"/>
+          <path d="M9.5 8a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0"/>
+        </svg><span>Metas do mês</span>
+      </button>
+      <button class="nav" data-screen="lancamentos" type="button">
+        <span class="nav-ico calendar"></span><span>Lançamentos diários</span>
+      </button>
+    </nav>
+  </aside>
+
+  <div class="app">
+    <main>
+      <header class="topbar">
+        <div>
+          <h2 id="screenTitle">Resultados</h2>
+          <p id="screenSubtitle">Resumo geral das vendas, metas e desempenho.</p>
+        </div>
+        <div class="topbar-actions">
+          <button id="printCurrentBtn" class="print-cta" type="button"><svg class="btn-icon bi bi-download" xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true"><path d="M.5 9.9a.5.5 0 0 1 .5.5v2.6a.5.5 0 0 0 .5.5h13a.5.5 0 0 0 .5-.5v-2.6a.5.5 0 0 1 1 0v2.6A1.5 1.5 0 0 1 14.5 14.5h-13A1.5 1.5 0 0 1 0 13v-2.6a.5.5 0 0 1 .5-.5"/><path d="M7.646 10.854a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 9.293V1.5a.5.5 0 0 0-1 0v7.793L5.354 7.146a.5.5 0 1 0-.708.708z"/></svg><span>Imprimir resultados</span></button>
+        </div>
+      </header>
+
+      <section id="resultados" class="screen active">
+        <div class="kpi-grid">
+          <div class="kpi"><div><span>Meta do mês</span><strong id="kpiMetaMes">R$ 0,00</strong></div><em class="circle blue"><span class="target-mini"></span></em></div>
+          <div class="kpi"><div><span>Total vendido</span><strong id="kpiVendido">R$ 0,00</strong></div><em class="circle green"><span class="money-mini"></span></em></div>
+          <div class="kpi"><div><span>Falta vender</span><strong id="kpiFalta">R$ 0,00</strong></div><em class="circle blue"><span class="cart-mini"></span></em></div>
+          <div class="kpi"><div><span>Atingimento</span><strong id="kpiAtingimento">0%</strong></div><em class="circle green"><span class="trend-mini"></span></em></div>
+        </div>
+
+        <div class="panel progress-panel">
+          <div class="panel-head progress-head">
+            <h3>Progresso geral</h3>
+            <strong id="progressPercent">0,00%</strong>
+          </div>
+          <div class="progress"><div id="progressBar"></div></div>
+          <span id="statusMeta" class="tag hidden-tag">Aguardando vendas</span>
+          <div class="mini-grid">
+            <div class="mini-item"><em class="circle blue"><span class="calendar-mini"></span></em><span>Dias com lançamento</span><strong id="diasLancados">0 / 0</strong></div>
+            <div class="mini-item"><em class="circle green"><span class="calendar-mini"></span></em><span>Meta diária da loja</span><strong id="metaDiariaLoja">R$ 0,00</strong></div>
+            <div class="mini-item"><em class="circle blue"><span class="user-mini"></span></em><span>Projeção do mês</span><strong id="projecaoMes">R$ 0,00</strong></div>
+            <div class="mini-item"><em class="circle green"><span class="trophy-mini"></span></em><span>Premiação projetada</span><strong id="premiacaoProjetada">R$ 0,00</strong></div>
+          </div>
+        </div>
+
+        <div class="panel ranking-panel">
+          <div class="panel-head">
+            <h3>Ranking de vendas</h3>
+            <span id="percentWarning" class="warning"></span>
+          </div>
+          <div class="table-wrap ranking-wrap">
+            <table class="ranking-table">
+              <thead>
+                <tr>
+                  <th>Posição</th><th>Funcionário</th><th>Meta</th><th>Vendido</th><th>% Atingido</th><th>Falta</th><th>Premiação</th>
+                </tr>
+              </thead>
+              <tbody id="resultRows"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section id="metas" class="screen">
+        <div class="panel form-panel">
+          <h3>Configuração do mês</h3>
+          <div class="form-grid">
+            <label>Mês de referência<input id="mesReferencia" type="month"></label>
+            <label>Dias de trabalho<input id="diasTrabalho" type="number" min="1" max="31"></label>
+            <label>Meta do mês<input id="metaMes" type="text" inputmode="decimal" autocomplete="off" placeholder="0,00"></label>
+            <label>Premiação projetada<input id="premiacao" type="text" inputmode="decimal" autocomplete="off" placeholder="0,00"></label>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <h3>Funcionários e distribuição da meta</h3>
+            <button id="addEmployee" class="primary" type="button">Adicionar funcionário</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Nome</th><th>Cargo</th><th>Percentual (%)</th><th>Meta individual</th><th>Meta diária</th><th></th></tr></thead>
+              <tbody id="employeeRows"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section id="lancamentos" class="screen">
+        <div class="panel">
+          <div class="panel-head">
+            <h3>Lançar vendas por dia</h3>
+            <button id="generateDays" class="secondary" type="button">Limpar lançamentos</button>
+          </div>
+          <p class="hint">Preencha as vendas por funcionário. Use ponto ou vírgula para centavos.</p>
+          <div class="table-wrap daily-wrap">
+            <table id="dailyTable">
+              <thead id="dailyHead"></thead>
+              <tbody id="dailyBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <nav class="mobile-nav" aria-label="Seções">
+    <div class="mobile-brand">
+      <img src="logo.png" alt="Farmais Tietê" />
+    </div>
+    <button class="nav active" data-screen="resultados" type="button">
+      <span class="nav-ico bars"></span>
+      <small>Resultados</small>
+    </button>
+    <button class="nav" data-screen="metas" type="button">
+      <svg class="nav-svg bi bi-bullseye" xmlns="http://www.w3.org/2000/svg" width="32" height="32" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true">
+          <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14m0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16"/>
+          <path d="M8 13A5 5 0 1 1 8 3a5 5 0 0 1 0 10m0 1A6 6 0 1 0 8 2a6 6 0 0 0 0 12"/>
+          <path d="M8 11A3 3 0 1 1 8 5a3 3 0 0 1 0 6m0 1A4 4 0 1 0 8 4a4 4 0 0 0 0 8"/>
+          <path d="M9.5 8a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0"/>
+        </svg>
+      <small>Metas</small>
+    </button>
+    <button class="nav" data-screen="lancamentos" type="button">
+      <span class="nav-ico calendar"></span>
+      <small>Lançamentos</small>
+    </button>
+  </nav>
+
+  <script src="app.js"></script>
+</body>
+</html>
