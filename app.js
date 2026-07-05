@@ -29,35 +29,208 @@ function parseVal(v){
   return Number(s) || 0;
 }
 
+function currentMonth(){
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+}
+
+function employeeId(){
+  if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+  return `emp_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+}
+
 const defaultState = {
-  settings:{month:'2026-06', workDays:26, monthlyGoal:150000, prize:0},
+  settings:{month:currentMonth(), workDays:26, monthlyGoal:150000, prize:0},
   employees:[
-    {id:crypto.randomUUID(), name:'Cristiana', role:'Balconista', percent:15},
-    {id:crypto.randomUUID(), name:'Genivaldo', role:'Farmacêutico', percent:15},
-    {id:crypto.randomUUID(), name:'Nadia', role:'Farmacêutico', percent:15},
-    {id:crypto.randomUUID(), name:'Arnobio', role:'Farmacêutico', percent:15},
-    {id:crypto.randomUUID(), name:'Lucas', role:'Atendente', percent:15},
-    {id:crypto.randomUUID(), name:'Nalva', role:'Atendente', percent:15},
-    {id:crypto.randomUUID(), name:'Fernanda', role:'Atendente', percent:15}
+    {id:employeeId(), name:'Cristiana', role:'Balconista', percent:15},
+    {id:employeeId(), name:'Genivaldo', role:'Farmacêutico', percent:15},
+    {id:employeeId(), name:'Nadia', role:'Farmacêutico', percent:15},
+    {id:employeeId(), name:'Arnobio', role:'Farmacêutico', percent:15},
+    {id:employeeId(), name:'Lucas', role:'Atendente', percent:15},
+    {id:employeeId(), name:'Nalva', role:'Atendente', percent:15},
+    {id:employeeId(), name:'Fernanda', role:'Atendente', percent:15}
   ],
-  sales:{}
+  sales:{},
+  updatedAt:null
 };
 
-let state = load();
-function load(){
-  try{
-    const saved = localStorage.getItem('metasVendasSite');
-    if(saved) return JSON.parse(saved);
-  }catch{}
-  const fresh = structuredClone(defaultState);
-  const demo = [22800.50,24100,19750,18900,17550,27200,27200];
-  for(let d=1; d<=fresh.settings.workDays; d++){
-    fresh.sales[d] = {};
-    fresh.employees.forEach((e,i)=> fresh.sales[d][e.id] = (demo[i]||0)/fresh.settings.workDays);
-  }
-  return fresh;
+const STORAGE_PREFIX = 'metasVendasSite';
+function currentMonthKey(username=getCurrentUsername()){
+  return `${STORAGE_PREFIX}:currentMonth:${username}`;
 }
-function save(){localStorage.setItem('metasVendasSite', JSON.stringify(state)); renderAll();}
+
+function storageKey(month, username=getCurrentUsername()){
+  return `${STORAGE_PREFIX}:${username}:${month}`;
+}
+
+function cloneState(obj){
+  return JSON.parse(JSON.stringify(obj));
+}
+
+function normalizeState(raw, month){
+  const base = cloneState(defaultState);
+  const data = raw && typeof raw === 'object' ? raw : {};
+  const normalized = {
+    settings:{...base.settings, ...(data.settings || {})},
+    employees:Array.isArray(data.employees) && data.employees.length ? data.employees : base.employees,
+    sales:data.sales && typeof data.sales === 'object' ? data.sales : {},
+    updatedAt:data.updatedAt || null
+  };
+  normalized.settings.month = month || normalized.settings.month || currentMonth();
+  normalized.settings.workDays = parseVal(normalized.settings.workDays) || 26;
+  normalized.settings.monthlyGoal = parseVal(normalized.settings.monthlyGoal);
+  normalized.settings.prize = parseVal(normalized.settings.prize);
+  normalized.employees = normalized.employees.map(e=>({
+    id:e.id || employeeId(),
+    name:e.name || 'Funcionário',
+    role:e.role || '',
+    percent:parseVal(e.percent)
+  }));
+  return normalized;
+}
+
+function createMonthState(month, baseState){
+  const base = baseState ? cloneState(baseState) : cloneState(defaultState);
+  return normalizeState({
+    settings:{...base.settings, month},
+    employees:base.employees,
+    sales:{},
+    updatedAt:new Date().toISOString()
+  }, month);
+}
+
+function loadLocalMonth(month){
+  try{
+    const saved = localStorage.getItem(storageKey(month));
+    if(saved) return normalizeState(JSON.parse(saved), month);
+  }catch{}
+
+  // Migração do salvamento antigo para o novo formato mensal.
+  try{
+    const legacy = localStorage.getItem(STORAGE_PREFIX);
+    if(legacy){
+      const legacyState = normalizeState(JSON.parse(legacy), month);
+      if(legacyState.settings.month === month){
+        localStorage.setItem(storageKey(month), JSON.stringify(legacyState));
+        return legacyState;
+      }
+    }
+  }catch{}
+
+  return null;
+}
+
+function loadInitial(){
+  const month = localStorage.getItem(currentMonthKey()) || currentMonth();
+  return loadLocalMonth(month) || createMonthState(month);
+}
+
+let cloudSaveTimer = null;
+let cloudReady = false;
+let state = loadInitial();
+
+function saveLocal(){
+  state.updatedAt = new Date().toISOString();
+  localStorage.setItem(currentMonthKey(), state.settings.month);
+  localStorage.setItem(storageKey(state.settings.month), JSON.stringify(state));
+}
+
+async function apiRequest(method, month, data){
+  if (location.protocol === 'file:') return null;
+
+  const options = {
+    method,
+    headers:{'Content-Type':'application/json'}
+  };
+
+  if (method !== 'GET') {
+    options.body = JSON.stringify({month, user:getCurrentUsername(), data});
+  }
+
+  const username = getCurrentUsername();
+  const response = await fetch(`/api/monthly-data?month=${encodeURIComponent(month)}&user=${encodeURIComponent(username)}`, options);
+  if (!response.ok) {
+    const errorText = await response.text().catch(()=>'');
+    throw new Error(errorText || `Erro ${response.status}`);
+  }
+  return response.json();
+}
+
+async function loadFromUpstash(month){
+  try{
+    const response = await apiRequest('GET', month);
+    cloudReady = true;
+    if(response && response.data) return normalizeState(response.data, month);
+  }catch(err){
+    console.warn('Upstash indisponível, usando salvamento local:', err.message);
+  }
+  return null;
+}
+
+async function saveToUpstash(){
+  try{
+    await apiRequest('POST', state.settings.month, state);
+    cloudReady = true;
+  }catch(err){
+    console.warn('Não foi possível salvar no Upstash agora:', err.message);
+  }
+}
+
+function scheduleCloudSave(){
+  clearTimeout(cloudSaveTimer);
+  cloudSaveTimer = setTimeout(()=>saveToUpstash(), 700);
+}
+
+function save(){
+  saveLocal();
+  scheduleCloudSave();
+  renderAll();
+}
+
+async function loadMonth(month){
+  const previousScreen = document.querySelector('.screen.active')?.id || 'resultados';
+  saveLocal();
+  scheduleCloudSave();
+
+  state = loadLocalMonth(month) || createMonthState(month, state);
+  ensureDays();
+  renderAll();
+  switchScreen(previousScreen);
+
+  const cloudState = await loadFromUpstash(month);
+  if(cloudState){
+    const localTime = state.updatedAt ? Date.parse(state.updatedAt) : 0;
+    const cloudTime = cloudState.updatedAt ? Date.parse(cloudState.updatedAt) : 0;
+    if(!state.updatedAt || cloudTime >= localTime){
+      state = cloudState;
+      ensureDays();
+      saveLocal();
+      renderAll();
+      switchScreen(previousScreen);
+    }
+  }else{
+    scheduleCloudSave();
+  }
+}
+
+async function initCloudSync(){
+  const cloudState = await loadFromUpstash(state.settings.month);
+  if(cloudState){
+    const localTime = state.updatedAt ? Date.parse(state.updatedAt) : 0;
+    const cloudTime = cloudState.updatedAt ? Date.parse(cloudState.updatedAt) : 0;
+    if(cloudTime > localTime){
+      state = cloudState;
+      ensureDays();
+      saveLocal();
+      renderAll();
+      switchScreen(document.querySelector('.screen.active')?.id || 'resultados');
+    }else{
+      scheduleCloudSave();
+    }
+  }else{
+    scheduleCloudSave();
+  }
+}
 
 function daysInMonth(month){const [y,m]=month.split('-').map(Number);return new Date(y,m,0).getDate();}
 function ensureDays(){
@@ -88,7 +261,7 @@ function ensureDays(){
   }
 
   if(changed){
-    localStorage.setItem('metasVendasSite', JSON.stringify(state));
+    saveLocal();
   }
 }
 function employeeTarget(e){return state.settings.monthlyGoal*(parseVal(e.percent)/100)}
@@ -148,6 +321,158 @@ window.addEventListener('afterprint', () => {
 });
 
 
+
+/* Login e criação de usuário */
+const authScreen = document.getElementById('authScreen');
+const loginForm = document.getElementById('loginForm');
+const registerForm = document.getElementById('registerForm');
+const loginMessage = document.getElementById('loginMessage');
+const registerMessage = document.getElementById('registerMessage');
+const showRegister = document.getElementById('showRegister');
+const showLogin = document.getElementById('showLogin');
+const logoutBtn = document.getElementById('logoutBtn');
+const AUTH_SESSION_KEY = 'farmaisAuthSession';
+
+function getCurrentUsername(){
+  try{
+    const session = JSON.parse(localStorage.getItem(AUTH_SESSION_KEY) || 'null');
+    return session && session.username ? String(session.username).trim().toLowerCase() : 'sem-login';
+  }catch{
+    return 'sem-login';
+  }
+}
+
+function setAuthMessage(el, message, success=false){
+  if(!el) return;
+  el.textContent = message || '';
+  el.classList.toggle('success', !!success);
+}
+
+function showAuthForm(form){
+  loginForm?.classList.toggle('active', form === 'login');
+  registerForm?.classList.toggle('active', form === 'register');
+  setAuthMessage(loginMessage, '');
+  setAuthMessage(registerMessage, '');
+}
+
+function isLoggedIn(){
+  try{
+    const session = JSON.parse(localStorage.getItem(AUTH_SESSION_KEY) || 'null');
+    return !!(session && session.username && session.loggedAt);
+  }catch{
+    return false;
+  }
+}
+
+function unlockApp(){
+  document.body.classList.remove('auth-locked');
+}
+
+function lockApp(){
+  document.body.classList.add('auth-locked');
+  showAuthForm('login');
+}
+
+async function authRequest(action, username, password){
+  if(location.protocol === 'file:'){
+    const users = JSON.parse(localStorage.getItem('farmaisLocalUsers') || '{}');
+    if(action === 'register'){
+      if(users[username]) throw new Error('Esse usuário já existe.');
+      users[username] = {password};
+      localStorage.setItem('farmaisLocalUsers', JSON.stringify(users));
+      return {ok:true};
+    }
+    if(action === 'login'){
+      if(!users[username] || users[username].password !== password) throw new Error('Usuário ou senha incorretos.');
+      return {ok:true, user:{username}};
+    }
+  }
+
+  const response = await fetch('/api/auth', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({action, username, password})
+  });
+
+  const data = await response.json().catch(()=>({}));
+  if(!response.ok || !data.ok){
+    throw new Error(data.error || 'Não foi possível concluir a operação.');
+  }
+  return data;
+}
+
+showRegister?.addEventListener('click', ()=>showAuthForm('register'));
+showLogin?.addEventListener('click', ()=>showAuthForm('login'));
+
+loginForm?.addEventListener('submit', async e=>{
+  e.preventDefault();
+  const username = loginUser.value.trim();
+  const password = loginPassword.value;
+
+  if(!username || !password){
+    setAuthMessage(loginMessage, 'Preencha usuário e senha.');
+    return;
+  }
+
+  setAuthMessage(loginMessage, 'Entrando...');
+  try{
+    await authRequest('login', username, password);
+    localStorage.setItem(AUTH_SESSION_KEY, JSON.stringify({username, loggedAt:new Date().toISOString()}));
+    setAuthMessage(loginMessage, 'Login realizado com sucesso.', true);
+    unlockApp();
+
+    const monthToLoad = localStorage.getItem(`${STORAGE_PREFIX}:currentMonth:${getCurrentUsername()}`) || state.settings.month || currentMonth();
+    await loadMonth(monthToLoad);
+
+    loginForm.reset();
+  }catch(err){
+    setAuthMessage(loginMessage, err.message || 'Usuário ou senha incorretos.');
+  }
+});
+
+registerForm?.addEventListener('submit', async e=>{
+  e.preventDefault();
+  const username = registerUser.value.trim();
+  const password = registerPassword.value;
+  const confirm = registerPasswordConfirm.value;
+
+  if(username.length < 3){
+    setAuthMessage(registerMessage, 'O usuário precisa ter pelo menos 3 caracteres.');
+    return;
+  }
+  if(password.length < 4){
+    setAuthMessage(registerMessage, 'A senha precisa ter pelo menos 4 caracteres.');
+    return;
+  }
+  if(password !== confirm){
+    setAuthMessage(registerMessage, 'As senhas não conferem.');
+    return;
+  }
+
+  setAuthMessage(registerMessage, 'Criando login...');
+  try{
+    await authRequest('register', username, password);
+    setAuthMessage(registerMessage, 'Login criado. Agora entre com seu usuário.', true);
+    registerForm.reset();
+    setTimeout(()=>showAuthForm('login'), 900);
+  }catch(err){
+    setAuthMessage(registerMessage, err.message || 'Não foi possível criar o login.');
+  }
+});
+
+logoutBtn?.addEventListener('click', ()=>{
+  saveLocal();
+  scheduleCloudSave();
+  localStorage.removeItem(AUTH_SESSION_KEY);
+  lockApp();
+});
+
+if(isLoggedIn()){
+  unlockApp();
+}else{
+  lockApp();
+}
+
 function renderSettings(){
   mesReferencia.value=state.settings.month;
   diasTrabalho.value=state.settings.workDays;
@@ -155,23 +480,41 @@ function renderSettings(){
   if (document.activeElement !== premiacao) premiacao.value=formatInputDecimal(state.settings.prize);
 }
 function bindSettings(){
-  mesReferencia.oninput=e=>{state.settings.month=e.target.value;ensureDays();save()};
-  diasTrabalho.oninput=e=>{state.settings.workDays=parseVal(e.target.value);save()};
+  mesReferencia.onchange=async e=>{
+    const nextMonth = e.target.value;
+    if(!nextMonth || nextMonth === state.settings.month) return;
+    await loadMonth(nextMonth);
+  };
+
+  diasTrabalho.oninput=e=>{
+    state.settings.workDays=parseVal(e.target.value);
+    save();
+  };
 
   metaMes.oninput=e=>{
     state.settings.monthlyGoal=parseVal(e.target.value);
-    localStorage.setItem('metasVendasSite', JSON.stringify(state));
+    saveLocal();
+    scheduleCloudSave();
     renderEmployees();
     renderResults();
   };
-  metaMes.onblur=()=>{metaMes.value=formatInputDecimal(state.settings.monthlyGoal);};
+  metaMes.onblur=()=>{
+    metaMes.value=formatInputDecimal(state.settings.monthlyGoal);
+    saveLocal();
+    scheduleCloudSave();
+  };
 
   premiacao.oninput=e=>{
     state.settings.prize=parseVal(e.target.value);
-    localStorage.setItem('metasVendasSite', JSON.stringify(state));
+    saveLocal();
+    scheduleCloudSave();
     renderResults();
   };
-  premiacao.onblur=()=>{premiacao.value=formatInputDecimal(state.settings.prize);};
+  premiacao.onblur=()=>{
+    premiacao.value=formatInputDecimal(state.settings.prize);
+    saveLocal();
+    scheduleCloudSave();
+  };
 }
 
 function renderEmployees(){
@@ -207,7 +550,7 @@ function renderDaily(){
   Object.keys(state.sales).map(Number).sort((a,b)=>a-b).forEach(day=>{
     const tr=document.createElement('tr');
     tr.innerHTML=`<td>${String(day).padStart(2,'0')}/${state.settings.month.split('-')[1]}</td>`+state.employees.map(e=>`<td><input inputmode="decimal" value="${state.sales[day][e.id]||''}" data-day="${day}" data-id="${e.id}" placeholder="0,00"></td>`).join('');
-    tr.querySelectorAll('input').forEach(inp=>inp.oninput=ev=>{state.sales[ev.target.dataset.day][ev.target.dataset.id]=parseVal(ev.target.value);localStorage.setItem('metasVendasSite', JSON.stringify(state));renderResults();});
+    tr.querySelectorAll('input').forEach(inp=>inp.oninput=ev=>{state.sales[ev.target.dataset.day][ev.target.dataset.id]=parseVal(ev.target.value);saveLocal();scheduleCloudSave();renderResults();});
     dailyBody.appendChild(tr);
   });
 }
@@ -256,7 +599,7 @@ function renderResults(){
 
   let visibleRank = 0;
   rankedEmployees.forEach(({ employee:e, sold:soldE, target })=>{
-    const miss=target-soldE, att=target?soldE/target*100:0, prize=soldE*0.10;
+    const miss=target-soldE, att=target?soldE/target*100:0, prize=sold>0?(soldE/sold)*totalPrize:0;
     const tr=document.createElement('tr');
     let rankHtml = '<span class="rank-empty">—</span>';
 
@@ -275,4 +618,13 @@ function renderResults(){
 }
 
 function renderAll(){ensureDays();renderSettings();renderEmployees();renderDaily();renderResults();}
-bindSettings();renderAll();switchScreen('resultados');
+bindSettings();
+renderAll();
+switchScreen('resultados');
+
+if(isLoggedIn()){
+  const monthToLoad = localStorage.getItem(`${STORAGE_PREFIX}:currentMonth:${getCurrentUsername()}`) || state.settings.month || currentMonth();
+  loadMonth(monthToLoad).then(()=>initCloudSync());
+}else{
+  initCloudSync();
+}

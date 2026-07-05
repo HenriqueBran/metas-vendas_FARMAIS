@@ -9,7 +9,60 @@
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="style.css" />
 </head>
-<body>
+<body class="auth-locked">
+  
+  <section id="authScreen" class="auth-screen">
+    <div class="auth-shell">
+      <div class="auth-left">
+        <div class="auth-left-inner">
+<form id="loginForm" class="auth-form active">
+            <h1>Login</h1>
+            <p>Acesse o sistema de metas e vendas.</p>
+
+            <label>Usuário
+              <input id="loginUser" type="text" autocomplete="username" placeholder="Digite seu usuário" required />
+            </label>
+
+            <label>Senha
+              <input id="loginPassword" type="password" autocomplete="current-password" placeholder="Digite sua senha" required />
+            </label>
+
+            <button class="auth-submit" type="submit">Entrar</button>
+            <span id="loginMessage" class="auth-message"></span>
+
+            <button id="showRegister" class="auth-link" type="button">Criar login</button>
+          </form>
+
+          <form id="registerForm" class="auth-form">
+            <h1>Criar login</h1>
+            <p>Cadastre um usuário para acessar o sistema.</p>
+
+            <label>Usuário
+              <input id="registerUser" type="text" autocomplete="username" placeholder="Crie um usuário" required />
+            </label>
+
+            <label>Senha
+              <input id="registerPassword" type="password" autocomplete="new-password" placeholder="Crie uma senha" required />
+            </label>
+
+            <label>Confirmar senha
+              <input id="registerPasswordConfirm" type="password" autocomplete="new-password" placeholder="Repita a senha" required />
+            </label>
+
+            <button class="auth-submit" type="submit">Criar login</button>
+            <span id="registerMessage" class="auth-message"></span>
+
+            <button id="showLogin" class="auth-link" type="button">Já tenho login</button>
+          </form>
+        </div>
+      </div>
+
+      <div class="auth-visual">
+        <img class="auth-visual-banner" src="banner-farmais-login.png" alt="Banner Farmais Tietê" />
+      </div>
+    </section>
+
+
   <aside id="sidebar" class="sidebar">
     <div class="brand">
       <img class="brand-logo" src="logo.png" alt="Farmais Tietê" />
@@ -43,6 +96,7 @@
           <p id="screenSubtitle">Resumo geral das vendas, metas e desempenho.</p>
         </div>
         <div class="topbar-actions">
+          <button id="logoutBtn" class="logout-btn" type="button">Sair</button>
           <button id="printCurrentBtn" class="print-cta" type="button"><svg class="btn-icon bi bi-download" xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true"><path d="M.5 9.9a.5.5 0 0 1 .5.5v2.6a.5.5 0 0 0 .5.5h13a.5.5 0 0 0 .5-.5v-2.6a.5.5 0 0 1 1 0v2.6A1.5 1.5 0 0 1 14.5 14.5h-13A1.5 1.5 0 0 1 0 13v-2.6a.5.5 0 0 1 .5-.5"/><path d="M7.646 10.854a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 9.293V1.5a.5.5 0 0 0-1 0v7.793L5.354 7.146a.5.5 0 1 0-.708.708z"/></svg><span>Imprimir resultados</span></button>
         </div>
       </header>
