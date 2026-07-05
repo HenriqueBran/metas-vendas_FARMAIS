@@ -61,21 +61,16 @@ function employeeId(){
   return `emp_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 }
 
-// Valores-base da calculadora original (planilha):
-// Meta individual é um valor próprio por funcionário, não é calculada pelo percentual.
-const PLANILHA_DEFAULT_META_INDIVIDUAL = 25000;
-const PLANILHA_DEFAULT_META_DIARIA = 828.57;
-
 const defaultState = {
   settings:{month:currentMonth(), workDays:26, monthlyGoal:150000, prize:0},
   employees:[
-    {id:employeeId(), name:'Cristiana', role:'Balconista', percent:15, target:25000, dailyTarget:828.57},
-    {id:employeeId(), name:'Genivaldo', role:'Farmacêutico', percent:15, target:25000, dailyTarget:828.57},
-    {id:employeeId(), name:'Nadia', role:'Farmacêutico', percent:15, target:25000, dailyTarget:828.57},
-    {id:employeeId(), name:'Arnobio', role:'Farmacêutico', percent:15, target:25000, dailyTarget:828.57},
-    {id:employeeId(), name:'Lucas', role:'Atendente', percent:15, target:25000, dailyTarget:828.57},
-    {id:employeeId(), name:'Nalva', role:'Atendente', percent:15, target:25000, dailyTarget:828.57},
-    {id:employeeId(), name:'Fernanda', role:'Atendente', percent:15, target:25000, dailyTarget:828.57}
+    {id:employeeId(), name:'Cristiana', role:'Balconista', percent:15},
+    {id:employeeId(), name:'Genivaldo', role:'Farmacêutico', percent:15},
+    {id:employeeId(), name:'Nadia', role:'Farmacêutico', percent:15},
+    {id:employeeId(), name:'Arnobio', role:'Farmacêutico', percent:15},
+    {id:employeeId(), name:'Lucas', role:'Atendente', percent:15},
+    {id:employeeId(), name:'Nalva', role:'Atendente', percent:15},
+    {id:employeeId(), name:'Fernanda', role:'Atendente', percent:15}
   ],
   sales:{},
   updatedAt:null
@@ -107,18 +102,12 @@ function normalizeState(raw, month){
   normalized.settings.workDays = parseVal(normalized.settings.workDays) || 26;
   normalized.settings.monthlyGoal = parseVal(normalized.settings.monthlyGoal);
   normalized.settings.prize = parseVal(normalized.settings.prize);
-  normalized.employees = normalized.employees.map(e=>{
-    const targetValue = e.target ?? e.goal ?? e.metaIndividual ?? e.meta ?? PLANILHA_DEFAULT_META_INDIVIDUAL;
-    const dailyValue = e.dailyTarget ?? e.metaDiaria ?? e.dailyGoal ?? PLANILHA_DEFAULT_META_DIARIA;
-    return {
-      id:e.id || employeeId(),
-      name:e.name || 'Funcionário',
-      role:e.role || '',
-      percent:parseVal(e.percent),
-      target:parseVal(targetValue) || PLANILHA_DEFAULT_META_INDIVIDUAL,
-      dailyTarget:parseVal(dailyValue) || PLANILHA_DEFAULT_META_DIARIA
-    };
-  });
+  normalized.employees = normalized.employees.map(e=>({
+    id:e.id || employeeId(),
+    name:e.name || 'Funcionário',
+    role:e.role || '',
+    percent:parseVal(e.percent)
+  }));
   return normalized;
 }
 
@@ -299,8 +288,8 @@ function ensureDays(){
     saveLocal();
   }
 }
-function employeeTarget(e){return parseVal(e.target ?? e.goal ?? e.metaIndividual ?? PLANILHA_DEFAULT_META_INDIVIDUAL)}
-function employeeDaily(e){return parseVal(e.dailyTarget ?? e.metaDiaria ?? e.dailyGoal) || employeeTarget(e)/Math.max(1,state.settings.workDays)}
+function employeeTarget(e){return state.settings.monthlyGoal*(parseVal(e.percent)/100)}
+function employeeDaily(e){return employeeTarget(e)/Math.max(1,state.settings.workDays)}
 function employeeSold(id){return Object.values(state.sales).reduce((sum,row)=>sum+parseVal(row[id]),0)}
 function totalSold(){return state.employees.reduce((sum,e)=>sum+employeeSold(e.id),0)}
 function launchedDays(){return Object.values(state.sales).filter(row=>Object.values(row).some(v=>parseVal(v)>0)).length}
@@ -564,39 +553,14 @@ function renderEmployees(){
   employeeRows.innerHTML='';
   state.employees.forEach(e=>{
     const tr=document.createElement('tr');
-    tr.innerHTML=`
-      <td><input value="${e.name}" data-k="name"></td>
-      <td><input value="${e.role}" data-k="role"></td>
-      <td><input value="${formatInputDecimal(parseVal(e.percent)).replace(',00','')}" data-k="percent" inputmode="decimal"></td>
-      <td><input value="${formatInputDecimal(employeeTarget(e))}" data-k="target" inputmode="decimal"></td>
-      <td><input value="${formatInputDecimal(employeeDaily(e))}" data-k="dailyTarget" inputmode="decimal"></td>
-      <td><button class="remove" type="button">Remover</button></td>`;
-
-    tr.querySelectorAll('input').forEach(inp=>{
-      inp.oninput=ev=>{
-        const key=ev.target.dataset.k;
-        if(['percent','target','dailyTarget'].includes(key)){
-          e[key]=parseVal(ev.target.value);
-        }else{
-          e[key]=ev.target.value;
-        }
-        saveLocal();
-        scheduleCloudSave();
-        renderResults();
-      };
-      inp.onblur=ev=>{
-        const key=ev.target.dataset.k;
-        if(['percent','target','dailyTarget'].includes(key)) ev.target.value = key==='percent' ? String(parseVal(e[key])).replace('.', ',') : formatInputDecimal(e[key]);
-        renderEmployees();
-      };
-    });
-
+    tr.innerHTML=`<td><input value="${e.name}" data-k="name"></td><td><input value="${e.role}" data-k="role"></td><td><input value="${e.percent}" data-k="percent"></td><td>${brl(employeeTarget(e))}</td><td>${brl(employeeDaily(e))}</td><td><button class="remove" type="button">Remover</button></td>`;
+    tr.querySelectorAll('input').forEach(inp=>inp.oninput=ev=>{e[ev.target.dataset.k]=ev.target.dataset.k==='percent'?parseVal(ev.target.value):ev.target.value;save()});
     tr.querySelector('.remove').onclick=()=>{if(confirm('Remover este funcionário?')){state.employees=state.employees.filter(x=>x.id!==e.id);Object.values(state.sales).forEach(row=>delete row[e.id]);save();}};
     employeeRows.appendChild(tr);
   });
 }
 addEmployee.onclick=()=>{
-  const emp={id:employeeId(),name:'Novo funcionário',role:'Cargo',percent:0,target:PLANILHA_DEFAULT_META_INDIVIDUAL,dailyTarget:PLANILHA_DEFAULT_META_DIARIA};
+  const emp={id:crypto.randomUUID(),name:'Novo funcionário',role:'Cargo',percent:0};
   state.employees.push(emp);
   Object.values(state.sales).forEach(row=>row[emp.id]=0);
   save();
@@ -639,7 +603,7 @@ function renderResults(){
   progressBar.style.width=Math.min(attainment,100)+'%';
   statusMeta.textContent=attainment>=100?'Meta batida':'Em andamento';
   metaDiariaLoja.textContent=brl(goal/Math.max(1,state.settings.workDays));
-  diasLancados.textContent=`${Math.min(days, launched)} / ${days}`;
+  diasLancados.textContent=`${Math.min(days, launched || days)} / ${days}`;
   projecaoMes.textContent=brl(projection || sold);
   premiacaoProjetada.textContent=brl(totalPrize);
   const percentSum=state.employees.reduce((s,e)=>s+parseVal(e.percent),0);
