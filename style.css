@@ -754,3 +754,65 @@ body.auth-locked .auth-screen{
 @media(max-width:640px){
   .auth-shell,.auth-left,.auth-visual,.auth-visual-banner{border-radius:0 !important;}
 }
+
+
+/* Correção mobile: deixar "Criar login" sempre visível */
+@media(max-width:640px){
+  body.auth-locked{
+    overflow:hidden;
+  }
+
+  .auth-screen{
+    overflow-y:auto!important;
+    align-items:flex-start!important;
+    min-height:100dvh;
+    height:100dvh;
+  }
+
+  .auth-shell{
+    min-height:auto!important;
+  }
+
+  .auth-visual{
+    min-height:145px!important;
+  }
+
+  .auth-left{
+    padding:20px 22px 24px!important;
+  }
+
+  .auth-form h1{
+    font-size:32px!important;
+    margin-bottom:8px!important;
+  }
+
+  .auth-form p{
+    margin-bottom:18px!important;
+    font-size:15px!important;
+  }
+
+  .auth-form label{
+    margin-bottom:12px!important;
+  }
+
+  .auth-form input{
+    height:52px!important;
+  }
+
+  .auth-submit{
+    height:54px!important;
+    margin-top:4px!important;
+  }
+
+  .auth-link{
+    display:block!important;
+    visibility:visible!important;
+    opacity:1!important;
+    margin-top:14px!important;
+    padding:10px 0 16px!important;
+    position:relative!important;
+    z-index:5!important;
+    color:#005095!important;
+    font-weight:900!important;
+  }
+}
