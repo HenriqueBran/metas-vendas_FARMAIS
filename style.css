@@ -832,3 +832,104 @@ body.auth-locked .auth-screen{
   font-weight:700!important;
   cursor:not-allowed!important;
 }
+
+/* Dropdown de folga nos lançamentos */
+.day-cell{
+  overflow:visible!important;
+}
+.day-cell-inner{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+  min-width:76px;
+}
+.day-menu{
+  position:relative;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+}
+.day-menu-btn{
+  width:26px;
+  height:26px;
+  border:1px solid #dce5f1;
+  border-radius:7px;
+  background:#ffffff;
+  color:#005095;
+  font-size:15px;
+  font-weight:900;
+  line-height:1;
+  cursor:pointer;
+  display:grid;
+  place-items:center;
+}
+.day-menu-btn:hover{
+  background:#f3f7fb;
+}
+.day-menu-list{
+  position:absolute;
+  top:32px;
+  left:50%;
+  transform:translateX(-50%);
+  display:none;
+  min-width:128px;
+  padding:6px;
+  background:#fff;
+  border:1px solid #dce5f1;
+  border-radius:10px;
+  box-shadow:0 14px 28px rgba(7,27,69,.16);
+  z-index:30;
+}
+.day-menu.open .day-menu-list{
+  display:block;
+}
+.day-menu-option{
+  width:100%;
+  border:0;
+  background:#fff;
+  color:#005095;
+  font-weight:800;
+  text-align:left;
+  padding:9px 10px;
+  border-radius:8px;
+  cursor:pointer;
+}
+.day-menu-option:hover{
+  background:#eef5ff;
+}
+.day-off-row td{
+  background:#f8fbff;
+}
+.day-off-input{
+  background:#eef3f8!important;
+  color:#005095!important;
+  font-weight:800!important;
+  text-transform:lowercase;
+  cursor:not-allowed!important;
+  text-align:center;
+}
+.daily-wrap,
+.daily-wrap table,
+.daily-wrap tbody,
+.daily-wrap tr{
+  overflow:visible!important;
+}
+
+
+/* Menu suspenso por campo de lançamento */
+.input-with-menu{position:relative;display:flex;align-items:center;gap:8px}
+.input-with-menu input{padding-right:12px}
+.cell-menu{position:relative;flex:0 0 auto}
+.cell-menu-btn{width:28px;height:28px;border:1px solid #dce5f1;border-radius:7px;background:#ffffff;color:#005095;font-size:15px;font-weight:900;line-height:1;cursor:pointer;display:grid;place-items:center}
+.cell-menu-btn:hover{background:#f3f7fb}
+.cell-menu-list{position:absolute;top:34px;right:0;display:none;min-width:140px;padding:6px;background:#fff;border:1px solid #dce5f1;border-radius:10px;box-shadow:0 14px 28px rgba(7,27,69,.16);z-index:35}
+.cell-menu.open .cell-menu-list{display:block}
+.cell-menu-option{width:100%;border:0;background:#fff;color:#005095;font-weight:700;text-align:left;padding:9px 10px;border-radius:8px;cursor:pointer}
+.cell-menu-option:hover{background:#eef5ff}
+.cell-menu-option.clear{color:#d23a3a}
+.status-input{font-weight:800!important;text-align:center;cursor:not-allowed!important;text-transform:capitalize}
+.status-folga{background:#fff6bf!important;border-color:#f0d463!important;color:#8a6d00!important}
+.status-falta{background:#ffe0e0!important;border-color:#f1aaaa!important;color:#b42318!important}
+.status-atestado{background:#f0e3ff!important;border-color:#ccb1ef!important;color:#6f42c1!important}
+.day-off-row .status-folga{background:#fff2a6!important}

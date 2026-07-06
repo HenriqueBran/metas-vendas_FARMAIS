@@ -51,6 +51,83 @@ function getCurrentUsername(){
   }
 }
 
+
+function sanitizeNumberInput(value){
+  let s = String(value ?? '');
+  s = s.replace(/[^\d.,]/g,'');
+  const lastComma = s.lastIndexOf(',');
+  const lastDot = s.lastIndexOf('.');
+  const decimalIndex = Math.max(lastComma, lastDot);
+
+  if(decimalIndex >= 0){
+    const before = s.slice(0, decimalIndex).replace(/[^\d]/g,'');
+    const after = s.slice(decimalIndex + 1).replace(/[^\d]/g,'');
+    const sep = s[decimalIndex];
+    return before + sep + after;
+  }
+
+  return s.replace(/[^\d]/g,'');
+}
+
+function isDayOff(day){
+  const row = state.sales[day] || {};
+  return row.__status === 'folga';
+}
+
+function setDayOff(day){
+  state.sales[day] ||= {};
+  state.sales[day].__status = 'folga';
+  state.employees.forEach(e=>{
+    state.sales[day][e.id] = 'folga';
+  });
+}
+
+function clearDayOff(day){
+  state.sales[day] ||= {};
+  delete state.sales[day].__status;
+  state.employees.forEach(e=>{
+    if(String(state.sales[day][e.id] ?? '').toLowerCase() === 'folga'){
+      state.sales[day][e.id] = 0;
+    }
+  });
+}
+
+
+const SPECIAL_DAY_VALUES = ['folga','falta','atestado'];
+
+function normalizeSpecialValue(value){
+  const normalized = String(value ?? '').trim().toLowerCase();
+  return SPECIAL_DAY_VALUES.includes(normalized) ? normalized : '';
+}
+
+function getCellSpecialValue(day, employeeId){
+  const row = state.sales[day] || {};
+  return normalizeSpecialValue(row[employeeId]);
+}
+
+function setCellSpecialValue(day, employeeId, status){
+  state.sales[day] ||= {};
+  const normalized = normalizeSpecialValue(status);
+  if(normalized){
+    state.sales[day][employeeId] = normalized;
+  }
+}
+
+function clearCellSpecialValue(day, employeeId){
+  state.sales[day] ||= {};
+  if(normalizeSpecialValue(state.sales[day][employeeId])){
+    state.sales[day][employeeId] = 0;
+  }
+}
+
+function specialValueLabel(status){
+  const normalized = normalizeSpecialValue(status);
+  if(normalized === 'folga') return 'folga';
+  if(normalized === 'falta') return 'falta';
+  if(normalized === 'atestado') return 'atestado';
+  return '';
+}
+
 function currentMonth(){
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
@@ -320,6 +397,8 @@ function recalcEmployeeGoals(){
 function employeeTarget(e){return parseVal(e.target)}
 function employeeDaily(e){return parseVal(e.daily)}
 function dailyCellValue(v){
+  const special = normalizeSpecialValue(v);
+  if(special) return specialValueLabel(special);
   if(v === undefined || v === null || v === 0 || v === '0') return '';
   return String(v);
 }
@@ -552,12 +631,14 @@ function bindSettings(){
   };
 
   diasTrabalho.oninput=e=>{
+    e.target.value=sanitizeNumberInput(e.target.value);
     state.settings.workDays=parseVal(e.target.value);
     recalcEmployeeGoals();
     save();
   };
 
   metaMes.oninput=e=>{
+    e.target.value=sanitizeNumberInput(e.target.value);
     state.settings.monthlyGoal=parseVal(e.target.value);
     recalcEmployeeGoals();
     saveLocal();
@@ -575,6 +656,7 @@ function bindSettings(){
   };
 
   premiacao.oninput=e=>{
+    e.target.value=sanitizeNumberInput(e.target.value);
     state.settings.prize=parseVal(e.target.value);
     recalcEmployeeGoals();
     saveLocal();
@@ -620,6 +702,7 @@ function renderEmployees(){
         }
 
         if(key==='percent'){
+          ev.target.value=sanitizeNumberInput(ev.target.value);
           e.percent=parseVal(ev.target.value);
           recalcEmployeeGoals();
           saveLocal();
@@ -666,6 +749,7 @@ generateDays.onclick=()=>{
   if(!confirm('Deseja limpar todos os lançamentos?')) return;
   ensureDays();
   Object.keys(state.sales).forEach(day=>{
+    delete state.sales[day].__status;
     state.employees.forEach(e=>{ state.sales[day][e.id] = 0; });
   });
   save();
@@ -677,10 +761,97 @@ function renderDaily(){
   dailyBody.innerHTML='';
   Object.keys(state.sales).map(Number).sort((a,b)=>a-b).forEach(day=>{
     const tr=document.createElement('tr');
-    tr.innerHTML=`<td>${String(day).padStart(2,'0')}/${state.settings.month.split('-')[1]}</td>`+
-      state.employees.map(e=>`<td><input value="${dailyCellValue(state.sales[day][e.id])}" data-day="${day}" data-id="${e.id}" placeholder="0,00"></td>`).join('');
+    const off = isDayOff(day);
+    if(off) tr.classList.add('day-off-row');
 
-    tr.querySelectorAll('input').forEach(inp=>inp.oninput=ev=>{
+    const dayCell = `
+      <td class="day-cell">
+        <div class="day-cell-inner">
+          <span>${String(day).padStart(2,'0')}/${state.settings.month.split('-')[1]}</span>
+          <div class="day-menu">
+            <button class="day-menu-btn" type="button" aria-label="Abrir opções do dia">▾</button>
+            <div class="day-menu-list">
+              <button type="button" class="day-menu-option" data-action="${off ? 'limpar-folga' : 'folga'}">${off ? 'Remover folga' : 'Folga'}</button>
+            </div>
+          </div>
+        </div>
+      </td>`;
+
+    tr.innerHTML = dayCell + state.employees.map(e=>{
+      const special = off ? 'folga' : getCellSpecialValue(day, e.id);
+      const value = special ? specialValueLabel(special) : dailyCellValue(state.sales[day][e.id]);
+      const readonly = !!special;
+      const statusClass = special ? ` status-${special}` : '';
+      const menuHtml = `
+        <div class="cell-menu">
+          <button class="cell-menu-btn" type="button" aria-label="Abrir opções do campo">▾</button>
+          <div class="cell-menu-list">
+            <button type="button" class="cell-menu-option" data-status="folga">Folga</button>
+            <button type="button" class="cell-menu-option" data-status="falta">Falta</button>
+            <button type="button" class="cell-menu-option" data-status="atestado">Atestado</button>
+            ${special ? '<button type="button" class="cell-menu-option clear" data-status="limpar">Limpar</button>' : ''}
+          </div>
+        </div>`;
+      return `<td><div class="input-with-menu"><input inputmode="decimal" value="${value}" data-day="${day}" data-id="${e.id}" placeholder="0,00" ${readonly ? 'readonly' : ''} class="${special ? 'status-input' : ''}${statusClass}">${menuHtml}</div></td>`;
+    }).join('');
+
+    const menu = tr.querySelector('.day-menu');
+    const menuBtn = tr.querySelector('.day-menu-btn');
+    const option = tr.querySelector('.day-menu-option');
+
+    menuBtn.onclick=(ev)=>{
+      ev.stopPropagation();
+      document.querySelectorAll('.day-menu.open, .cell-menu.open').forEach(el=>{
+        if(el !== menu) el.classList.remove('open');
+      });
+      menu.classList.toggle('open');
+    };
+
+    option.onclick=(ev)=>{
+      ev.stopPropagation();
+      if(option.dataset.action === 'folga'){
+        setDayOff(day);
+      }else{
+        clearDayOff(day);
+      }
+      saveLocal();
+      scheduleCloudSave();
+      renderDaily();
+      renderResults();
+    };
+
+    tr.querySelectorAll('.cell-menu').forEach(menuEl=>{
+      const btn = menuEl.querySelector('.cell-menu-btn');
+      btn.onclick=(ev)=>{
+        ev.stopPropagation();
+        document.querySelectorAll('.day-menu.open, .cell-menu.open').forEach(el=>{
+          if(el !== menuEl) el.classList.remove('open');
+        });
+        menuEl.classList.toggle('open');
+      };
+      menuEl.querySelectorAll('.cell-menu-option').forEach(statusBtn=>{
+        statusBtn.onclick=(ev)=>{
+          ev.stopPropagation();
+          const status = statusBtn.dataset.status;
+          const wrapper = statusBtn.closest('.input-with-menu');
+          const input = wrapper.querySelector('input');
+          const rowDay = input.dataset.day;
+          const employeeId = input.dataset.id;
+          if(status === 'limpar'){
+            clearCellSpecialValue(rowDay, employeeId);
+          }else{
+            setCellSpecialValue(rowDay, employeeId, status);
+          }
+          saveLocal();
+          scheduleCloudSave();
+          renderDaily();
+          renderResults();
+        };
+      });
+    });
+
+    tr.querySelectorAll('input:not([readonly])').forEach(inp=>inp.oninput=ev=>{
+      ev.target.value=sanitizeNumberInput(ev.target.value);
       state.sales[ev.target.dataset.day][ev.target.dataset.id]=ev.target.value;
       saveLocal();
       scheduleCloudSave();
