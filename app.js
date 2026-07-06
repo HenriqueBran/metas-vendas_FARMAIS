@@ -554,6 +554,7 @@ function switchScreen(id){
   };
   screenTitle.textContent=titles[id][0];
   screenSubtitle.textContent=titles[id][1];
+  closeTooltipItems();
 
   const printBtn = document.getElementById('printCurrentBtn');
   const vouchersBtn = document.getElementById('printVouchersBtn');
@@ -576,6 +577,24 @@ function switchScreen(id){
   }
 }
 document.querySelectorAll('.nav').forEach(btn=>btn.onclick=()=>switchScreen(btn.dataset.screen));
+
+function closeTooltipItems(){
+  document.querySelectorAll('.tooltip-item').forEach(item=>{
+    item.classList.remove('is-open');
+    const btn = item.querySelector('.tooltip-toggle');
+    if(btn) btn.setAttribute('aria-expanded','false');
+  });
+}
+/* Tooltip somente por hover/cursor */
+document.querySelectorAll('.tooltip-toggle').forEach(btn=>{
+  btn.addEventListener('click', (event)=>{
+    event.preventDefault();
+    event.stopPropagation();
+    closeTooltipItems();
+  });
+});
+
+
 
 const printCurrentBtn = document.getElementById('printCurrentBtn');
 if (printCurrentBtn) {
