@@ -933,3 +933,34 @@ body.auth-locked .auth-screen{
 .status-falta{background:#ffe0e0!important;border-color:#f1aaaa!important;color:#b42318!important}
 .status-atestado{background:#f0e3ff!important;border-color:#ccb1ef!important;color:#6f42c1!important}
 .day-off-row .status-folga{background:#fff2a6!important}
+
+/* ajustes dropdown por campo */
+
+.day-cell-inner{justify-content:flex-start!important;min-width:auto!important}
+.input-with-menu{position:relative;display:flex;align-items:center;gap:8px}
+.input-with-menu input{flex:1 1 auto;padding-right:12px}
+.cell-menu{position:relative;flex:0 0 auto}
+.cell-menu-btn{transition:background .18s ease, border-color .18s ease, transform .18s ease}
+.cell-menu-btn:hover{background:#eef5ff;border-color:#bcd0ea;transform:translateY(-1px)}
+.cell-menu-list{position:absolute;top:34px;right:0;display:none;flex-direction:column;gap:4px;min-width:148px;padding:8px;background:#fff;border:1px solid #dce5f1;border-radius:10px;box-shadow:0 14px 28px rgba(7,27,69,.16);z-index:35}
+.cell-menu.open .cell-menu-list{display:flex}
+.cell-menu-option{display:block;width:100%;border:0;background:#fff;color:#005095;font-weight:700;text-align:left;padding:10px 12px;border-radius:8px;cursor:pointer;transition:background .18s ease,color .18s ease, transform .18s ease}
+.cell-menu-option:hover{background:#eef5ff;color:#003a6e;transform:translateX(2px)}
+.cell-menu-option.clear:hover{background:#fff1f1;color:#b42318}
+
+.day-menu{display:none!important}
+
+/* CTA de comprovantes */
+#printVouchersBtn{
+  min-width:230px;
+}
+@media(max-width:980px){
+  #printVouchersBtn{
+    width:100%;
+  }
+}
+@media print{
+  #printVouchersBtn{
+    display:none!important;
+  }
+}
