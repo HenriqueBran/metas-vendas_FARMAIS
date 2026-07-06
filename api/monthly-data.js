@@ -10,6 +10,10 @@ function validateMonth(month) {
   return typeof month === 'string' && /^\d{4}-\d{2}$/.test(month);
 }
 
+function isCurrentMonthRequest(month) {
+  return month === 'current';
+}
+
 function normalizeUser(user) {
   const value = String(user || 'sem-login').trim().toLowerCase();
   return value.replace(/[^a-z0-9._-]/g, '') || 'sem-login';
@@ -50,11 +54,33 @@ module.exports = async function handler(req, res) {
     const month = req.query.month;
     const user = normalizeUser(req.query.user || (req.body && req.body.user));
 
+    if (isCurrentMonthRequest(month)) {
+      const currentMonthKey = `${PREFIX}:users:${user}:currentMonth`;
+
+      if (req.method === 'GET') {
+        const currentMonth = await redisCommand(['GET', currentMonthKey]);
+        return send(res, 200, { ok: true, user, currentMonth: currentMonth || null });
+      }
+
+      if (req.method === 'POST') {
+        const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
+        const nextMonth = body.month;
+
+        if (!validateMonth(nextMonth)) {
+          return send(res, 400, { error: 'Mês inválido. Use o formato YYYY-MM.' });
+        }
+
+        await redisCommand(['SET', currentMonthKey, nextMonth]);
+        return send(res, 200, { ok: true, user, currentMonth: nextMonth });
+      }
+    }
+
     if (!validateMonth(month)) {
       return send(res, 400, { error: 'Mês inválido. Use o formato YYYY-MM.' });
     }
 
     const key = `${PREFIX}:data:${user}:${month}`;
+    const currentMonthKey = `${PREFIX}:users:${user}:currentMonth`;
 
     if (req.method === 'GET') {
       const result = await redisCommand(['GET', key]);
@@ -75,6 +101,7 @@ module.exports = async function handler(req, res) {
 
       await redisCommand(['SET', key, JSON.stringify(data)]);
       await redisCommand(['SADD', `${PREFIX}:users:${user}:months`, month]);
+      await redisCommand(['SET', currentMonthKey, month]);
 
       return send(res, 200, { ok: true, month, user });
     }

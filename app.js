@@ -236,7 +236,14 @@ function loadLocalMonth(month){
 }
 
 function loadInitial(){
-  const month = localStorage.getItem(currentMonthKey()) || currentMonth();
+  const month = currentMonth();
+
+  // Quando há login, a nuvem será carregada logo em seguida.
+  // Começamos com estado limpo para evitar mostrar/salvar cache antigo do navegador.
+  if(getCurrentUsername() !== 'sem-login'){
+    return createMonthState(month);
+  }
+
   return loadLocalMonth(month) || createMonthState(month);
 }
 
@@ -272,6 +279,42 @@ async function apiRequest(method, month, data){
   return response.json();
 }
 
+
+async function apiCurrentMonth(method='GET', month=null){
+  if (location.protocol === 'file:') return null;
+
+  const username = getCurrentUsername();
+  if(username === 'sem-login') return null;
+
+  const options = {
+    method,
+    headers:{'Content-Type':'application/json'}
+  };
+
+  if(method !== 'GET'){
+    options.body = JSON.stringify({month});
+  }
+
+  const response = await fetch(`/api/monthly-data?month=current&user=${encodeURIComponent(username)}`, options);
+  if(!response.ok) return null;
+  return response.json();
+}
+
+async function getCloudCurrentMonth(){
+  try{
+    const response = await apiCurrentMonth('GET');
+    return response && response.currentMonth ? response.currentMonth : null;
+  }catch{
+    return null;
+  }
+}
+
+async function setCloudCurrentMonth(month){
+  try{
+    if(month) await apiCurrentMonth('POST', month);
+  }catch{}
+}
+
 async function loadFromUpstash(month){
   try{
     const response = await apiRequest('GET', month);
@@ -286,6 +329,7 @@ async function loadFromUpstash(month){
 async function saveToUpstash(){
   try{
     await apiRequest('POST', state.settings.month, state);
+    await setCloudCurrentMonth(state.settings.month);
     cloudReady = true;
   }catch(err){
     console.warn('Não foi possível salvar no Upstash agora:', err.message);
@@ -310,43 +354,34 @@ window.addEventListener('beforeunload', ()=>{
 
 async function loadMonth(month){
   const previousScreen = document.querySelector('.screen.active')?.id || 'resultados';
+  const targetMonth = month || currentMonth();
 
-  // Em login/troca de dispositivo, a nuvem precisa ser a fonte principal.
-  // Assim evitamos que dados antigos do navegador sobrescrevam o Upstash.
-  const cloudState = await loadFromUpstash(month);
+  const cloudState = await loadFromUpstash(targetMonth);
+
   if(cloudState){
     state = cloudState;
     ensureDays();
     saveLocal(false);
     renderAll();
     switchScreen(previousScreen);
+    await setCloudCurrentMonth(targetMonth);
     return;
   }
 
-  // Se ainda não houver dados na nuvem para este usuário/mês,
-  // usa o local e envia para a nuvem. Isso migra dados antigos do PC.
-  const localState = loadLocalMonth(month);
-  state = localState || createMonthState(month, state);
+  // Se a nuvem ainda estiver vazia para este mês, cria um mês limpo.
+  // Isso impede que um navegador antigo sobrescreva a nuvem automaticamente.
+  state = createMonthState(targetMonth);
   ensureDays();
-  saveLocal();
+  saveLocal(false);
   renderAll();
   switchScreen(previousScreen);
-  scheduleCloudSave();
+  await setCloudCurrentMonth(targetMonth);
 }
 
 async function initCloudSync(){
-  const cloudState = await loadFromUpstash(state.settings.month);
-
-  if(cloudState){
-    state = cloudState;
-    ensureDays();
-    saveLocal(false);
-    renderAll();
-    switchScreen(document.querySelector('.screen.active')?.id || 'resultados');
-    return;
-  }
-
-  scheduleCloudSave();
+  const sharedMonth = await getCloudCurrentMonth();
+  const monthToLoad = sharedMonth || currentMonth();
+  await loadMonth(monthToLoad);
 }
 
 function daysInMonth(month){const [y,m]=month.split('-').map(Number);return new Date(y,m,0).getDate();}
@@ -428,6 +463,7 @@ function switchScreen(id){
 
   const printBtn = document.getElementById('printCurrentBtn');
   const vouchersBtn = document.getElementById('printVouchersBtn');
+  const refreshBtn = document.getElementById('refreshCloudBtn');
   if (printBtn) {
     if (id === 'resultados') {
       setPrintButtonLabel('Imprimir resultados');
@@ -445,9 +481,13 @@ function switchScreen(id){
   if (vouchersBtn) {
     vouchersBtn.classList.toggle('hidden-print-cta', id !== 'resultados');
   }
+  if (refreshBtn) {
+    refreshBtn.classList.toggle('hidden-print-cta', id !== 'resultados');
+  }
 }
 document.querySelectorAll('.nav').forEach(btn=>btn.onclick=()=>switchScreen(btn.dataset.screen));
 
+const refreshCloudBtn = document.getElementById('refreshCloudBtn');
 const printCurrentBtn = document.getElementById('printCurrentBtn');
 if (printCurrentBtn) {
   printCurrentBtn.addEventListener('click', () => {
@@ -456,6 +496,18 @@ if (printCurrentBtn) {
     setTimeout(() => window.print(), 80);
   });
 }
+
+if (refreshCloudBtn) {
+  refreshCloudBtn.addEventListener('click', async () => {
+    refreshCloudBtn.disabled = true;
+    const oldText = refreshCloudBtn.textContent;
+    refreshCloudBtn.textContent = 'Atualizando...';
+    await loadMonth(state.settings.month || currentMonth());
+    refreshCloudBtn.textContent = oldText || 'Atualizar da nuvem';
+    refreshCloudBtn.disabled = false;
+  });
+}
+
 window.addEventListener('afterprint', () => {
   document.body.classList.remove('print-mode', 'print-resultados', 'print-lancamentos');
 });
@@ -899,7 +951,7 @@ loginForm?.addEventListener('submit', async e=>{
     setAuthMessage(loginMessage, 'Login realizado com sucesso.', true);
     unlockApp();
 
-    const monthToLoad = localStorage.getItem(`${STORAGE_PREFIX}:currentMonth:${getCurrentUsername()}`) || state.settings.month || currentMonth();
+    const monthToLoad = await getCloudCurrentMonth() || currentMonth();
     await loadMonth(monthToLoad);
 
     loginForm.reset();
@@ -961,6 +1013,7 @@ function bindSettings(){
   mesReferencia.onchange=async e=>{
     const nextMonth = e.target.value;
     if(!nextMonth || nextMonth === state.settings.month) return;
+    await setCloudCurrentMonth(nextMonth);
     await loadMonth(nextMonth);
   };
 
@@ -1229,6 +1282,5 @@ renderAll();
 switchScreen('resultados');
 
 if(isLoggedIn()){
-  const monthToLoad = localStorage.getItem(`${STORAGE_PREFIX}:currentMonth:${getCurrentUsername()}`) || state.settings.month || currentMonth();
-  loadMonth(monthToLoad).then(()=>initCloudSync());
+  initCloudSync();
 }

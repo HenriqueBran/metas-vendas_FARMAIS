@@ -1017,3 +1017,22 @@ body.auth-locked .auth-screen{
 .password-toggle.is-visible .eye-closed{
   display:block;
 }
+
+/* Botão atualizar nuvem */
+#refreshCloudBtn{
+  min-width:170px;
+}
+#refreshCloudBtn:disabled{
+  opacity:.65;
+  cursor:wait;
+}
+@media(max-width:980px){
+  #refreshCloudBtn{
+    width:100%;
+  }
+}
+@media print{
+  #refreshCloudBtn{
+    display:none!important;
+  }
+}
