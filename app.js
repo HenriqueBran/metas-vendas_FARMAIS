@@ -248,6 +248,8 @@ function loadInitial(){
 }
 
 let cloudSaveTimer = null;
+let cloudAutoSyncTimer = null;
+let lastCloudSavedAt = 0;
 let cloudReady = false;
 let state = loadInitial();
 
@@ -327,19 +329,41 @@ async function loadFromUpstash(month){
 }
 
 async function saveToUpstash(){
+  if(getCurrentUsername() === 'sem-login') return;
+
   try{
+    // Garante que qualquer alteração feita no mobile receba timestamp novo
+    // antes de ser enviada para o Upstash.
+    state.updatedAt = new Date().toISOString();
+    localStorage.setItem(currentMonthKey(), state.settings.month);
+    localStorage.setItem(storageKey(state.settings.month), JSON.stringify(state));
+
     await apiRequest('POST', state.settings.month, state);
     await setCloudCurrentMonth(state.settings.month);
+    lastCloudSavedAt = Date.now();
     cloudReady = true;
   }catch(err){
     console.warn('Não foi possível salvar no Upstash agora:', err.message);
   }
 }
 
+
+async function saveNowToCloud(){
+  clearTimeout(cloudSaveTimer);
+  cloudSaveTimer = null;
+  await saveToUpstash();
+}
+
 function scheduleCloudSave(){
   if(getCurrentUsername() === 'sem-login') return;
   clearTimeout(cloudSaveTimer);
-  cloudSaveTimer = setTimeout(()=>saveToUpstash(), 700);
+
+  // No celular, timers podem atrasar ao trocar de aba/app.
+  // Por isso o salvamento fica mais rápido.
+  cloudSaveTimer = setTimeout(async ()=>{
+    cloudSaveTimer = null;
+    await saveToUpstash();
+  }, 350);
 }
 
 function save(){
@@ -351,6 +375,17 @@ function save(){
 window.addEventListener('beforeunload', ()=>{
   if(getCurrentUsername() !== 'sem-login') saveToUpstash();
 });
+
+window.addEventListener('pagehide', ()=>{
+  if(getCurrentUsername() !== 'sem-login') saveToUpstash();
+});
+
+document.addEventListener('visibilitychange', ()=>{
+  if(document.hidden && getCurrentUsername() !== 'sem-login'){
+    saveNowToCloud();
+  }
+});
+
 
 async function loadMonth(month){
   const previousScreen = document.querySelector('.screen.active')?.id || 'resultados';
@@ -383,6 +418,65 @@ async function initCloudSync(){
   const monthToLoad = sharedMonth || currentMonth();
   await loadMonth(monthToLoad);
 }
+
+
+async function refreshFromCloud(){
+  if(getCurrentUsername() === 'sem-login') return;
+  if(cloudSaveTimer) return;
+  if(Date.now() - lastCloudSavedAt < 1200) return;
+
+  // Não puxa nuvem enquanto o usuário está digitando em algum campo.
+  if(document.activeElement && ['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName)) return;
+
+  const activeScreen = document.querySelector('.screen.active')?.id || 'resultados';
+  const month = state.settings?.month || await getCloudCurrentMonth() || currentMonth();
+  const cloudState = await loadFromUpstash(month);
+
+  if(!cloudState) return;
+
+  const localTime = state.updatedAt ? Date.parse(state.updatedAt) : 0;
+  const cloudTime = cloudState.updatedAt ? Date.parse(cloudState.updatedAt) : 0;
+
+  if(cloudTime > localTime){
+    state = cloudState;
+    ensureDays();
+    saveLocal(false);
+    renderAll();
+    switchScreen(activeScreen);
+  }
+}
+
+
+function handleCloudCommitFromField(event){
+  const target = event.target;
+  if(!target || !target.matches || !target.matches('input, select, textarea')) return;
+  if(getCurrentUsername() === 'sem-login') return;
+
+  // Garante que alterações feitas no celular sejam enviadas quando o teclado fecha
+  // ou o campo perde foco, mesmo que o timer normal não rode.
+  saveNowToCloud();
+}
+
+document.addEventListener('change', handleCloudCommitFromField, true);
+document.addEventListener('blur', handleCloudCommitFromField, true);
+
+function startAutoCloudSync(){
+  stopAutoCloudSync();
+  if(getCurrentUsername() === 'sem-login') return;
+  cloudAutoSyncTimer = setInterval(()=>refreshFromCloud(), 5000);
+}
+
+function stopAutoCloudSync(){
+  if(cloudAutoSyncTimer){
+    clearInterval(cloudAutoSyncTimer);
+    cloudAutoSyncTimer = null;
+  }
+}
+
+window.addEventListener('focus', ()=>refreshFromCloud());
+document.addEventListener('visibilitychange', ()=>{
+  if(!document.hidden) refreshFromCloud();
+});
 
 function daysInMonth(month){const [y,m]=month.split('-').map(Number);return new Date(y,m,0).getDate();}
 function ensureDays(){
@@ -463,7 +557,6 @@ function switchScreen(id){
 
   const printBtn = document.getElementById('printCurrentBtn');
   const vouchersBtn = document.getElementById('printVouchersBtn');
-  const refreshBtn = document.getElementById('refreshCloudBtn');
   if (printBtn) {
     if (id === 'resultados') {
       setPrintButtonLabel('Imprimir resultados');
@@ -481,30 +574,15 @@ function switchScreen(id){
   if (vouchersBtn) {
     vouchersBtn.classList.toggle('hidden-print-cta', id !== 'resultados');
   }
-  if (refreshBtn) {
-    refreshBtn.classList.toggle('hidden-print-cta', id !== 'resultados');
-  }
 }
 document.querySelectorAll('.nav').forEach(btn=>btn.onclick=()=>switchScreen(btn.dataset.screen));
 
-const refreshCloudBtn = document.getElementById('refreshCloudBtn');
 const printCurrentBtn = document.getElementById('printCurrentBtn');
 if (printCurrentBtn) {
   printCurrentBtn.addEventListener('click', () => {
     const target = printCurrentBtn.dataset.printScreen || 'resultados';
     document.body.classList.add('print-mode', `print-${target}`);
     setTimeout(() => window.print(), 80);
-  });
-}
-
-if (refreshCloudBtn) {
-  refreshCloudBtn.addEventListener('click', async () => {
-    refreshCloudBtn.disabled = true;
-    const oldText = refreshCloudBtn.textContent;
-    refreshCloudBtn.textContent = 'Atualizando...';
-    await loadMonth(state.settings.month || currentMonth());
-    refreshCloudBtn.textContent = oldText || 'Atualizar da nuvem';
-    refreshCloudBtn.disabled = false;
   });
 }
 
@@ -953,6 +1031,7 @@ loginForm?.addEventListener('submit', async e=>{
 
     const monthToLoad = await getCloudCurrentMonth() || currentMonth();
     await loadMonth(monthToLoad);
+    startAutoCloudSync();
 
     loginForm.reset();
   }catch(err){
@@ -991,6 +1070,7 @@ registerForm?.addEventListener('submit', async e=>{
 });
 
 logoutBtn?.addEventListener('click', async ()=>{
+  stopAutoCloudSync();
   saveLocal();
   await saveToUpstash();
   localStorage.removeItem(AUTH_SESSION_KEY);
@@ -1282,5 +1362,5 @@ renderAll();
 switchScreen('resultados');
 
 if(isLoggedIn()){
-  initCloudSync();
+  initCloudSync().then(()=>startAutoCloudSync());
 }
