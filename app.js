@@ -53,20 +53,27 @@ function getCurrentUsername(){
 
 
 function sanitizeNumberInput(value){
-  let s = String(value ?? '');
-  s = s.replace(/[^\d.,]/g,'');
-  const lastComma = s.lastIndexOf(',');
-  const lastDot = s.lastIndexOf('.');
-  const decimalIndex = Math.max(lastComma, lastDot);
+  let v = String(value ?? '');
 
-  if(decimalIndex >= 0){
-    const before = s.slice(0, decimalIndex).replace(/[^\d]/g,'');
-    const after = s.slice(decimalIndex + 1).replace(/[^\d]/g,'');
-    const sep = s[decimalIndex];
-    return before + sep + after;
+  // Permite somente números, ponto e vírgula.
+  v = v.replace(/[^0-9.,]/g, '');
+
+  // Se houver mais de um separador, mantém o último como decimal.
+  // Exemplos:
+  // 1.265,91 -> 1265,91
+  // 1,265.91 -> 1265.91
+  const lastComma = v.lastIndexOf(',');
+  const lastDot = v.lastIndexOf('.');
+  const lastSep = Math.max(lastComma, lastDot);
+
+  if(lastSep >= 0){
+    const integerPart = v.slice(0, lastSep).replace(/[.,]/g, '');
+    const decimalPart = v.slice(lastSep + 1).replace(/[.,]/g, '');
+    const sep = v[lastSep];
+    v = integerPart + sep + decimalPart;
   }
 
-  return s.replace(/[^\d]/g,'');
+  return v;
 }
 
 function isDayOff(day){
@@ -1265,7 +1272,7 @@ function renderDaily(){
             ${special ? '<button type="button" class="cell-menu-option clear" data-status="limpar">Limpar</button>' : ''}
           </div>
         </div>`;
-      return `<td><div class="input-with-menu"><input inputmode="decimal" value="${value}" data-day="${day}" data-id="${e.id}" placeholder="0,00" ${readonly ? 'readonly' : ''} class="${special ? 'status-input' : ''}${statusClass}">${menuHtml}</div></td>`;
+      return `<td><div class="input-with-menu"><input type="text" inputmode="decimal" autocomplete="off" value="${value}" data-day="${day}" data-id="${e.id}" placeholder="0,00" ${readonly ? 'readonly' : ''} class="${special ? 'status-input' : ''}${statusClass}">${menuHtml}</div></td>`;
     }).join('');
 
     tr.querySelectorAll('.cell-menu').forEach(menuEl=>{
