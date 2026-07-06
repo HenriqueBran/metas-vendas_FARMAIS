@@ -244,8 +244,8 @@ let cloudSaveTimer = null;
 let cloudReady = false;
 let state = loadInitial();
 
-function saveLocal(){
-  state.updatedAt = new Date().toISOString();
+function saveLocal(touch=true){
+  if(touch) state.updatedAt = new Date().toISOString();
   localStorage.setItem(currentMonthKey(), state.settings.month);
   localStorage.setItem(storageKey(state.settings.month), JSON.stringify(state));
 }
@@ -304,49 +304,49 @@ function save(){
   renderAll();
 }
 
+window.addEventListener('beforeunload', ()=>{
+  if(getCurrentUsername() !== 'sem-login') saveToUpstash();
+});
+
 async function loadMonth(month){
   const previousScreen = document.querySelector('.screen.active')?.id || 'resultados';
-  saveLocal();
-  scheduleCloudSave();
 
-  state = loadLocalMonth(month) || createMonthState(month, state);
-  ensureDays();
-  renderAll();
-  switchScreen(previousScreen);
-
+  // Em login/troca de dispositivo, a nuvem precisa ser a fonte principal.
+  // Assim evitamos que dados antigos do navegador sobrescrevam o Upstash.
   const cloudState = await loadFromUpstash(month);
   if(cloudState){
-    const localTime = state.updatedAt ? Date.parse(state.updatedAt) : 0;
-    const cloudTime = cloudState.updatedAt ? Date.parse(cloudState.updatedAt) : 0;
-    if(!state.updatedAt || cloudTime >= localTime){
-      state = cloudState;
-      ensureDays();
-      saveLocal();
-      renderAll();
-      switchScreen(previousScreen);
-    }
-  }else{
-    scheduleCloudSave();
+    state = cloudState;
+    ensureDays();
+    saveLocal(false);
+    renderAll();
+    switchScreen(previousScreen);
+    return;
   }
+
+  // Se ainda não houver dados na nuvem para este usuário/mês,
+  // usa o local e envia para a nuvem. Isso migra dados antigos do PC.
+  const localState = loadLocalMonth(month);
+  state = localState || createMonthState(month, state);
+  ensureDays();
+  saveLocal();
+  renderAll();
+  switchScreen(previousScreen);
+  scheduleCloudSave();
 }
 
 async function initCloudSync(){
   const cloudState = await loadFromUpstash(state.settings.month);
+
   if(cloudState){
-    const localTime = state.updatedAt ? Date.parse(state.updatedAt) : 0;
-    const cloudTime = cloudState.updatedAt ? Date.parse(cloudState.updatedAt) : 0;
-    if(cloudTime > localTime){
-      state = cloudState;
-      ensureDays();
-      saveLocal();
-      renderAll();
-      switchScreen(document.querySelector('.screen.active')?.id || 'resultados');
-    }else{
-      scheduleCloudSave();
-    }
-  }else{
-    scheduleCloudSave();
+    state = cloudState;
+    ensureDays();
+    saveLocal(false);
+    renderAll();
+    switchScreen(document.querySelector('.screen.active')?.id || 'resultados');
+    return;
   }
+
+  scheduleCloudSave();
 }
 
 function daysInMonth(month){const [y,m]=month.split('-').map(Number);return new Date(y,m,0).getDate();}
@@ -938,9 +938,9 @@ registerForm?.addEventListener('submit', async e=>{
   }
 });
 
-logoutBtn?.addEventListener('click', ()=>{
+logoutBtn?.addEventListener('click', async ()=>{
   saveLocal();
-  scheduleCloudSave();
+  await saveToUpstash();
   localStorage.removeItem(AUTH_SESSION_KEY);
   lockApp();
 });
