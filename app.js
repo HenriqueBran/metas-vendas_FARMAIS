@@ -775,6 +775,23 @@ if (printVouchersBtn) {
   printVouchersBtn.addEventListener('click', openVoucherPrint);
 }
 
+
+/* Mostrar/ocultar senha */
+document.querySelectorAll('.password-toggle').forEach(button=>{
+  button.addEventListener('click', ()=>{
+    const wrap = button.closest('.password-wrap');
+    const input = wrap?.querySelector('input');
+    if(!input) return;
+
+    const showing = input.type === 'text';
+    input.type = showing ? 'password' : 'text';
+    button.classList.toggle('is-visible', !showing);
+    button.setAttribute('aria-label', showing ? 'Mostrar senha' : 'Ocultar senha');
+    button.setAttribute('aria-pressed', String(!showing));
+    input.focus();
+  });
+});
+
 /* Login e criação de usuário */
 const authScreen = document.getElementById('authScreen');
 const loginForm = document.getElementById('loginForm');
