@@ -50,6 +50,7 @@ try{
    As chaves antigas não são usadas por esta versão. */
 try{
   localStorage.removeItem('farmaisAuthSession');
+  localStorage.removeItem('farmaisLocalUsers');
   Object.keys(localStorage).forEach((key)=>{
     if(key.startsWith('metasVendasSite:') && !key.startsWith('metasVendasSite:reset-2026-07-07:')){
       localStorage.removeItem(key);
@@ -351,6 +352,107 @@ function createMonthState(month, baseState){
   }, month);
 }
 
+
+function hasEmployeeTemplate(candidate){
+  return !!(candidate && Array.isArray(candidate.employees) && candidate.employees.length > 0);
+}
+
+function hasMonthlyConfig(candidate){
+  const settings = candidate && candidate.settings ? candidate.settings : {};
+  return parseVal(settings.workDays) > 0 || parseVal(settings.monthlyGoal) > 0 || parseVal(settings.prize) > 0;
+}
+
+function mergeMonthWithEmployeeTemplate(month, monthState, templateState){
+  const selected = monthState ? cloneState(monthState) : createMonthState(month);
+  const template = cloneState(templateState);
+
+  const merged = createMonthState(month, template);
+
+  // Se o mês novo já tinha configuração própria, mantém essa configuração.
+  // Se estava zerado, reaproveita a configuração do mês usado como modelo.
+  if(hasMonthlyConfig(selected)){
+    merged.settings = {...merged.settings, ...selected.settings, month};
+  }else{
+    merged.settings = {...template.settings, month};
+  }
+
+  // Lançamentos e vendas extras continuam mensais.
+  // Funcionários/cargos/percentuais permanecem.
+  merged.sales = {};
+  merged.extraTotals = {};
+  merged.updatedAt = new Date().toISOString();
+  return normalizeState(merged, month);
+}
+
+function findLocalEmployeeTemplate(targetMonth){
+  try{
+    if(hasEmployeeTemplate(state)) return state;
+
+    const username = getCurrentUsername();
+    const prefix = `${STORAGE_PREFIX}:${username}:`;
+    let best = null;
+    let bestTime = -Infinity;
+
+    Object.keys(localStorage).forEach(key=>{
+      if(!key.startsWith(prefix)) return;
+      const month = key.slice(prefix.length);
+      if(!/^\d{4}-\d{2}$/.test(month) || month === targetMonth) return;
+
+      try{
+        const candidate = normalizeState(JSON.parse(localStorage.getItem(key) || '{}'), month);
+        if(!hasEmployeeTemplate(candidate)) return;
+
+        const time = candidate.updatedAt ? Date.parse(candidate.updatedAt) : 0;
+        const monthDistance = Math.abs(month.localeCompare(targetMonth));
+        const score = time || (100000 - monthDistance);
+        if(score > bestTime){
+          best = candidate;
+          bestTime = score;
+        }
+      }catch{}
+    });
+
+    return best;
+  }catch{
+    return null;
+  }
+}
+
+async function getCloudMonths(){
+  try{
+    const response = await apiRequest('GET', 'months');
+    return response && Array.isArray(response.months) ? response.months : [];
+  }catch{
+    return [];
+  }
+}
+
+async function findCloudEmployeeTemplate(targetMonth){
+  const months = await getCloudMonths();
+
+  // Prioriza meses anteriores/mais próximos. Se não encontrar, tenta qualquer mês com funcionários.
+  const ordered = months
+    .filter(month=>/^\d{4}-\d{2}$/.test(month) && month !== targetMonth)
+    .sort((a,b)=>{
+      const aBefore = a < targetMonth ? 0 : 1;
+      const bBefore = b < targetMonth ? 0 : 1;
+      if(aBefore !== bBefore) return aBefore - bBefore;
+      return b.localeCompare(a);
+    });
+
+  for(const month of ordered){
+    const candidate = await loadFromUpstash(month);
+    if(hasEmployeeTemplate(candidate)) return candidate;
+  }
+
+  return null;
+}
+
+async function findEmployeeTemplate(targetMonth){
+  return findLocalEmployeeTemplate(targetMonth) || await findCloudEmployeeTemplate(targetMonth);
+}
+
+
 function loadLocalMonth(month){
   try{
     const saved = localStorage.getItem(storageKey(month));
@@ -431,6 +533,7 @@ async function apiRequest(method, month, data){
 
   if (method !== 'GET') {
     options.body = JSON.stringify({month, user:getCurrentUsername(), data});
+    options.keepalive = true;
   }
 
   const username = getCurrentUsername();
@@ -457,6 +560,7 @@ async function apiCurrentMonth(method='GET', month=null){
 
   if(method !== 'GET'){
     options.body = JSON.stringify({month});
+    options.keepalive = true;
   }
 
   const response = await fetch(`/api/monthly-data?month=current&user=${encodeURIComponent(username)}`, options);
@@ -553,6 +657,28 @@ function scheduleCloudSave(delay=CLOUD_SAVE_DELAY_MS){
   }, delay);
 }
 
+
+function sleep(ms){
+  return new Promise(resolve=>setTimeout(resolve, ms));
+}
+
+async function flushPendingCloudSave(){
+  if(getCurrentUsername() === 'sem-login') return;
+
+  clearTimeout(cloudSaveTimer);
+  cloudSaveTimer = null;
+
+  let guard = 0;
+  while(cloudSaveInFlight && guard < 20){
+    await sleep(50);
+    guard += 1;
+  }
+
+  if(cloudDirty){
+    await saveToUpstash(true);
+  }
+}
+
 function save(){
   saveLocal();
   scheduleCloudSave();
@@ -591,6 +717,12 @@ async function loadMonth(month){
   const previousScreen = appReady ? (document.querySelector('.screen.active')?.id || getSavedScreen()) : getSavedScreen();
   const targetMonth = month || currentMonth();
 
+  // Se o usuário acabou de alterar algo e troca de mês em seguida,
+  // salva o mês atual antes de substituir o estado na tela.
+  if(appReady && state?.settings?.month && state.settings.month !== targetMonth){
+    await flushPendingCloudSave();
+  }
+
   const cloudState = await loadFromUpstash(targetMonth);
   const localState = loadLocalMonth(targetMonth);
 
@@ -617,8 +749,19 @@ async function loadMonth(month){
     selectedState = localState;
     shouldSendLocalToCloud = true;
   }else{
-    selectedState = createMonthState(targetMonth);
+    const templateState = await findEmployeeTemplate(targetMonth);
+    selectedState = templateState ? mergeMonthWithEmployeeTemplate(targetMonth, null, templateState) : createMonthState(targetMonth);
     shouldSendLocalToCloud = true;
+  }
+
+  // Segurança: se já existia um mês salvo vazio por causa da versão anterior,
+  // recupera os funcionários do mês anterior/local/nuvem.
+  if(!hasEmployeeTemplate(selectedState)){
+    const templateState = await findEmployeeTemplate(targetMonth);
+    if(templateState){
+      selectedState = mergeMonthWithEmployeeTemplate(targetMonth, selectedState, templateState);
+      shouldSendLocalToCloud = true;
+    }
   }
 
   state = selectedState;
@@ -672,13 +815,23 @@ async function refreshFromCloud(force=false){
     const cloudTime = cloudState.updatedAt ? Date.parse(cloudState.updatedAt) : 0;
 
     if(cloudTime > localTime){
-      state = cloudState;
-      ensureDays();
-      saveLocal(false);
-      lastCloudFingerprint = cloudFingerprint();
-      cloudDirty = false;
+      if(!hasEmployeeTemplate(cloudState) && hasEmployeeTemplate(state)){
+        cloudState = mergeMonthWithEmployeeTemplate(month, cloudState, state);
+        state = cloudState;
+        ensureDays();
+        saveLocal(false);
+        cloudDirty = true;
+        scheduleCloudSave(1000);
+      }else{
+        state = cloudState;
+        ensureDays();
+        saveLocal(false);
+        lastCloudFingerprint = cloudFingerprint();
+        cloudDirty = false;
+      }
+
       renderAll();
-      switchScreen(activeScreen);
+      switchScreen(activeScreen, false);
     }
   }finally{
     cloudRefreshInFlight = false;
@@ -805,13 +958,13 @@ function ensureDays(){
 function recalcEmployeeGoals(){
   const totalPercent = state.employees.reduce((sum,e)=>sum+parseVal(e.percent),0);
   const count = Math.max(1, state.employees.length);
-  const days = Math.max(1, parseVal(state.settings.workDays) || 1);
+  const workDays = parseVal(state.settings.workDays);
 
   state.employees.forEach(e=>{
     const share = totalPercent > 0 ? (parseVal(e.percent) / totalPercent) : (1 / count);
     const target = (parseVal(state.settings.monthlyGoal) || 0) * share;
     e.target = Number(target.toFixed(2));
-    e.daily = Number((target / days).toFixed(2));
+    e.daily = workDays > 0 ? Number((target / workDays).toFixed(2)) : 0;
   });
 }
 
@@ -1438,7 +1591,6 @@ function bindSettings(){
   mesReferencia.onchange=async e=>{
     const nextMonth = e.target.value;
     if(!nextMonth || nextMonth === state.settings.month) return;
-    await setCloudCurrentMonth(nextMonth);
     await loadMonth(nextMonth);
   };
 
@@ -1495,8 +1647,8 @@ function renderEmployees(){
   state.employees.forEach(e=>{
     const tr=document.createElement('tr');
     tr.innerHTML=`
-      <td><input value="${e.name}" data-k="name"></td>
-      <td><input value="${e.role}" data-k="role"></td>
+      <td><input value="${escapeHtml(e.name)}" data-k="name"></td>
+      <td><input value="${escapeHtml(e.role)}" data-k="role"></td>
       <td><input inputmode="decimal" value="${String(e.percent).replace('.', ',')}" data-k="percent"></td>
       <td><input class="auto-field" inputmode="decimal" value="${formatInputDecimal(employeeTarget(e))}" data-k="target" readonly title="Calculado automaticamente pela meta do mês e percentual"></td>
       <td><input class="auto-field" inputmode="decimal" value="${formatInputDecimal(employeeDaily(e))}" data-k="daily" readonly title="Calculado automaticamente pela meta individual dividida pelos dias de trabalho"></td>
@@ -1613,7 +1765,7 @@ function renderExtraSales(){
     normalizeExtraTotalsForEmployee(e.id);
     const tr=document.createElement('tr');
 
-    tr.innerHTML = `<td class="employee-name-cell">${e.name}</td>` + EXTRA_SALES_CATEGORIES.map(cat=>{
+    tr.innerHTML = `<td class="employee-name-cell">${escapeHtml(e.name)}</td>` + EXTRA_SALES_CATEGORIES.map(cat=>{
       const value = extraCellValue(state.extraTotals[e.id][cat.key]);
       return `<td><input type="text" inputmode="decimal" autocomplete="off" value="${value}" data-id="${e.id}" data-cat="${cat.key}" placeholder="0,00"></td>`;
     }).join('');
@@ -1636,7 +1788,7 @@ function renderExtraSales(){
 
 function renderDaily(){
   ensureDays();
-  dailyHead.innerHTML='<tr><th>Dia</th>'+state.employees.map(e=>`<th>${e.name}</th>`).join('')+'</tr>';
+  dailyHead.innerHTML='<tr><th>Dia</th>'+state.employees.map(e=>`<th>${escapeHtml(e.name)}</th>`).join('')+'</tr>';
   dailyBody.innerHTML='';
   Object.keys(state.sales).map(Number).sort((a,b)=>a-b).forEach(day=>{
     const tr=document.createElement('tr');
@@ -1721,7 +1873,7 @@ function renderResults(){
   progressPercent.textContent=pct(attainment);
   progressBar.style.width=Math.min(attainment,100)+'%';
   statusMeta.textContent=attainment>=100?'Meta batida':'Em andamento';
-  metaDiariaLoja.textContent=brl(goal/Math.max(1,state.settings.workDays));
+  metaDiariaLoja.textContent=brl(parseVal(state.settings.workDays) > 0 ? goal/parseVal(state.settings.workDays) : 0);
   diasLancados.textContent=`${launched} / ${days}`;
   if (typeof projecaoMes !== 'undefined' && projecaoMes) projecaoMes.textContent=brl(projection || sold);
   premiacaoProjetada.textContent=brl(totalPrize);
@@ -1763,7 +1915,7 @@ function renderResults(){
     const soldClass=soldE>=target && soldE>0?'val-green':'val-blue';
     const attClass=att>=100?'val-green':'val-orange';
     const missClass=miss<=0?'negative':'positive';
-    tr.innerHTML=`<td>${rankHtml}</td><td>${e.name}</td><td>${brl(target)}</td><td class="${soldClass}">${brl(soldE)}</td><td class="${attClass}">${pct(att)}</td><td class="${missClass}">${brl(miss)}</td><td class="val-green">${brl(prize)}</td>`;
+    tr.innerHTML=`<td>${rankHtml}</td><td>${escapeHtml(e.name)}</td><td>${brl(target)}</td><td class="${soldClass}">${brl(soldE)}</td><td class="${attClass}">${pct(att)}</td><td class="${missClass}">${brl(miss)}</td><td class="val-green">${brl(prize)}</td>`;
     resultRows.appendChild(tr);
   });
 }

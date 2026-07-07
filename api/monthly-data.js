@@ -14,6 +14,10 @@ function isCurrentMonthRequest(month) {
   return month === 'current';
 }
 
+function isMonthsRequest(month) {
+  return month === 'months';
+}
+
 function normalizeUser(user) {
   const value = String(user || 'sem-login').trim().toLowerCase();
   return value.replace(/[^a-z0-9._-]/g, '') || 'sem-login';
@@ -73,6 +77,16 @@ module.exports = async function handler(req, res) {
         await redisCommand(['SET', currentMonthKey, nextMonth]);
         return send(res, 200, { ok: true, user, currentMonth: nextMonth });
       }
+    }
+
+    if (isMonthsRequest(month)) {
+      if (req.method !== 'GET') {
+        res.setHeader('Allow', 'GET');
+        return send(res, 405, { error: 'Método não permitido.' });
+      }
+
+      const months = await redisCommand(['SMEMBERS', `${PREFIX}:users:${user}:months`]);
+      return send(res, 200, { ok: true, user, months: Array.isArray(months) ? months.sort() : [] });
     }
 
     if (!validateMonth(month)) {
