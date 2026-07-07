@@ -551,7 +551,8 @@ async function loadMonth(month){
   ensureDays();
   saveLocal(false);
   renderAll();
-  switchScreen(previousScreen);
+  switchScreen(previousScreen, false);
+  finishAppBoot();
   await setCloudCurrentMonth(targetMonth);
 
   appReady = true;
@@ -1184,7 +1185,12 @@ function unlockApp(){
 
 function lockApp(){
   document.body.classList.add('auth-locked');
+  document.body.classList.remove('app-booting');
   showAuthForm('login');
+}
+
+function finishAppBoot(){
+  document.body.classList.remove('app-booting');
 }
 
 async function authRequest(action, username, password){
@@ -1657,4 +1663,5 @@ if(isLoggedIn()){
   appReady = true;
   renderAll();
   switchScreen(getSavedScreen(), false);
+  finishAppBoot();
 }

@@ -1699,3 +1699,15 @@ textarea{
     box-shadow:none!important;
   }
 }
+
+/* Evita pulo de aba no carregamento */
+body.app-booting:not(.auth-locked) .sidebar,
+body.app-booting:not(.auth-locked) .mobile-nav,
+body.app-booting:not(.auth-locked) main{
+  visibility:hidden!important;
+  opacity:0!important;
+}
+
+body.app-booting:not(.auth-locked){
+  background:#f3f7fc;
+}
