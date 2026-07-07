@@ -1632,3 +1632,66 @@ textarea{
     min-width:760px!important;
   }
 }
+
+/* Ajuste visual menu lateral - textos menores */
+.sidebar .brand-title{
+  font-size:20px!important;
+  line-height:1.15!important;
+  opacity:.92;
+}
+
+.sidebar .brand-subtitle{
+  font-size:14px!important;
+  line-height:1.25!important;
+  opacity:.82;
+}
+
+.sidebar .nav{
+  font-size:15px!important;
+  font-weight:500!important;
+  opacity:.78;
+  filter:none!important;
+  text-shadow:none!important;
+}
+
+.sidebar .nav span:not(.nav-ico){
+  font-size:15px!important;
+  font-weight:500!important;
+  letter-spacing:-.1px;
+}
+
+.sidebar .nav.active{
+  opacity:.92;
+  background:rgba(66,145,232,.78)!important;
+  box-shadow:none!important;
+}
+
+.sidebar .nav:hover{
+  opacity:.95;
+  background:rgba(66,145,232,.55);
+  box-shadow:none!important;
+}
+
+.sidebar .nav-ico,
+.sidebar .nav-svg{
+  opacity:.82;
+  transform:scale(.9);
+}
+
+.sidebar .nav.active .nav-ico,
+.sidebar .nav.active .nav-svg{
+  opacity:.92;
+}
+
+@media(max-width:980px){
+  .mobile-nav .nav small{
+    font-size:10px!important;
+    font-weight:500!important;
+    opacity:.82;
+  }
+
+  .mobile-nav .nav.active{
+    background:rgba(66,145,232,.75)!important;
+    box-shadow:none!important;
+  }
+}

@@ -333,6 +333,7 @@ let cloudSaveTimer = null;
 let cloudAutoSyncTimer = null;
 let lastCloudSavedAt = 0;
 let cloudReady = false;
+let appReady = false;
 let state = loadInitial();
 
 function saveLocal(touch=true){
@@ -410,12 +411,14 @@ async function loadFromUpstash(month){
   return null;
 }
 
-async function saveToUpstash(){
+async function saveToUpstash(force=false){
   if(getCurrentUsername() === 'sem-login') return;
 
+  // Evita que o estado inicial vazio sobrescreva os dados salvos
+  // quando a página é recarregada antes de terminar o carregamento.
+  if(!appReady && !force) return;
+
   try{
-    // Garante que qualquer alteração feita no mobile receba timestamp novo
-    // antes de ser enviada para o Upstash.
     state.updatedAt = new Date().toISOString();
     localStorage.setItem(currentMonthKey(), state.settings.month);
     localStorage.setItem(storageKey(state.settings.month), JSON.stringify(state));
@@ -474,31 +477,50 @@ async function loadMonth(month){
   const targetMonth = month || currentMonth();
 
   const cloudState = await loadFromUpstash(targetMonth);
+  const localState = loadLocalMonth(targetMonth);
 
-  if(cloudState){
-    state = cloudState;
-    ensureDays();
-    saveLocal(false);
-    renderAll();
-    switchScreen(previousScreen);
-    await setCloudCurrentMonth(targetMonth);
-    return;
+  let selectedState = null;
+  let shouldSendLocalToCloud = false;
+
+  if(cloudState && localState){
+    const cloudTime = cloudState.updatedAt ? Date.parse(cloudState.updatedAt) : 0;
+    const localTime = localState.updatedAt ? Date.parse(localState.updatedAt) : 0;
+
+    if(localTime > cloudTime){
+      selectedState = localState;
+      shouldSendLocalToCloud = true;
+    }else{
+      selectedState = cloudState;
+    }
+  }else if(cloudState){
+    selectedState = cloudState;
+  }else if(localState){
+    selectedState = localState;
+    shouldSendLocalToCloud = true;
+  }else{
+    selectedState = createMonthState(targetMonth);
+    shouldSendLocalToCloud = true;
   }
 
-  // Se a nuvem ainda estiver vazia para este mês, cria um mês limpo.
-  // Isso impede que um navegador antigo sobrescreva a nuvem automaticamente.
-  state = createMonthState(targetMonth);
+  state = selectedState;
   ensureDays();
   saveLocal(false);
   renderAll();
   switchScreen(previousScreen);
   await setCloudCurrentMonth(targetMonth);
+
+  appReady = true;
+
+  if(shouldSendLocalToCloud){
+    await saveToUpstash(true);
+  }
 }
 
 async function initCloudSync(){
   const sharedMonth = await getCloudCurrentMonth();
   const monthToLoad = sharedMonth || currentMonth();
   await loadMonth(monthToLoad);
+  appReady = true;
 }
 
 
@@ -1177,6 +1199,7 @@ loginForm?.addEventListener('submit', async e=>{
 
     const monthToLoad = await getCloudCurrentMonth() || currentMonth();
     await loadMonth(monthToLoad);
+    appReady = true;
     startAutoCloudSync();
 
     loginForm.reset();
@@ -1218,7 +1241,8 @@ registerForm?.addEventListener('submit', async e=>{
 logoutBtn?.addEventListener('click', async ()=>{
   stopAutoCloudSync();
   saveLocal();
-  await saveToUpstash();
+  await saveToUpstash(true);
+  appReady = false;
   localStorage.removeItem(AUTH_SESSION_KEY);
   lockApp();
 });
@@ -1316,12 +1340,13 @@ function renderEmployees(){
         }
 
         if(key==='percent'){
+          // Não renderiza a tabela durante a digitação.
+          // Renderizar aqui recriava o input e fazia aceitar apenas 1 caractere por vez.
           ev.target.value=sanitizeNumberInput(ev.target.value);
           e.percent=parseVal(ev.target.value);
           recalcEmployeeGoals();
           saveLocal();
           scheduleCloudSave();
-          renderEmployees();
           renderResults();
         }
       };
@@ -1329,7 +1354,7 @@ function renderEmployees(){
       inp.onblur=ev=>{
         const key=ev.target.dataset.k;
         if(key==='percent'){
-          ev.target.value=String(parseVal(e.percent)).replace('.', ',');
+          ev.target.value = ev.target.value.trim() === '' ? '' : String(parseVal(e.percent)).replace('.', ',');
           recalcEmployeeGoals();
           saveLocal();
           scheduleCloudSave();
@@ -1564,9 +1589,13 @@ function renderResults(){
 
 function renderAll(){ensureDays();recalcEmployeeGoals();renderSettings();renderEmployees();renderDaily();renderExtraSales();renderResults();}
 bindSettings();
-renderAll();
-switchScreen('resultados');
-
 if(isLoggedIn()){
-  initCloudSync().then(()=>startAutoCloudSync());
+  initCloudSync().then(()=>{
+    appReady = true;
+    startAutoCloudSync();
+  });
+}else{
+  appReady = true;
+  renderAll();
+  switchScreen('resultados');
 }
