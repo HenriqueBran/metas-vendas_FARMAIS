@@ -23,6 +23,42 @@ function normalizeUser(user) {
   return value.replace(/[^a-z0-9._-]/g, '') || 'sem-login';
 }
 
+function readBearerToken(req) {
+  const header = req.headers.authorization || req.headers.Authorization || '';
+  const match = String(header).match(/^Bearer\s+(.+)$/i);
+  return match ? match[1].trim() : '';
+}
+
+function sessionKey(token) {
+  return `${PREFIX}:sessions:${token}`;
+}
+
+async function getAuthenticatedUser(req) {
+  const token = readBearerToken(req);
+  if (!token) {
+    const error = new Error('Sessão inválida ou expirada. Faça login novamente.');
+    error.statusCode = 401;
+    throw error;
+  }
+
+  const saved = await redisCommand(['GET', sessionKey(token)]);
+  if (!saved) {
+    const error = new Error('Sessão inválida ou expirada. Faça login novamente.');
+    error.statusCode = 401;
+    throw error;
+  }
+
+  const session = JSON.parse(saved);
+  const username = normalizeUser(session.username);
+  if (!username || username === 'sem-login') {
+    const error = new Error('Sessão inválida ou expirada. Faça login novamente.');
+    error.statusCode = 401;
+    throw error;
+  }
+
+  return username;
+}
+
 async function redisCommand(command) {
   const url = process.env.UPSTASH_REDIS_REST_URL;
   const token = process.env.UPSTASH_REDIS_REST_TOKEN;
@@ -56,7 +92,7 @@ async function redisCommand(command) {
 module.exports = async function handler(req, res) {
   try {
     const month = req.query.month;
-    const user = normalizeUser(req.query.user || (req.body && req.body.user));
+    const user = await getAuthenticatedUser(req);
 
     if (isCurrentMonthRequest(month)) {
       const currentMonthKey = `${PREFIX}:users:${user}:currentMonth`;

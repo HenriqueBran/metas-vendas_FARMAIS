@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 
 const PREFIX = 'farmais-tiete:metas-vendas:reset-2026-07-07';
+const SESSION_TTL_SECONDS = 60 * 60 * 24;
 
 function send(res, status, body) {
   res.statusCode = status;
@@ -21,6 +22,16 @@ function normalizeUsername(username) {
 
 function validateUsername(username) {
   return typeof username === 'string' && username.length >= 3 && username.length <= 60;
+}
+
+function readBearerToken(req) {
+  const header = req.headers.authorization || req.headers.Authorization || '';
+  const match = String(header).match(/^Bearer\s+(.+)$/i);
+  return match ? match[1].trim() : '';
+}
+
+function sessionKey(token) {
+  return `${PREFIX}:sessions:${token}`;
 }
 
 function hashPassword(password, salt) {
@@ -64,13 +75,40 @@ async function redisCommand(command) {
 
 module.exports = async function handler(req, res) {
   try {
+    if (req.method === 'GET') {
+      const totalUsers = Number(await redisCommand(['SCARD', `${PREFIX}:users`]) || 0);
+      return send(res, 200, {
+        ok:true,
+        hasUsers: totalUsers > 0,
+        registrationLocked: totalUsers > 0,
+        userCount: totalUsers
+      });
+    }
+
     if (req.method !== 'POST') {
-      res.setHeader('Allow', 'POST');
+      res.setHeader('Allow', 'GET, POST');
       return send(res, 405, { ok:false, error:'Método não permitido.' });
     }
 
     const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
     const action = String(body.action || '');
+
+    if (action === 'status') {
+      const totalUsers = Number(await redisCommand(['SCARD', `${PREFIX}:users`]) || 0);
+      return send(res, 200, {
+        ok:true,
+        hasUsers: totalUsers > 0,
+        registrationLocked: totalUsers > 0,
+        userCount: totalUsers
+      });
+    }
+
+    if (action === 'logout') {
+      const token = readBearerToken(req);
+      if (token) await redisCommand(['DEL', sessionKey(token)]);
+      return send(res, 200, { ok:true });
+    }
+
     const username = normalizeUsername(body.username);
     const password = String(body.password || '');
 
@@ -85,6 +123,14 @@ module.exports = async function handler(req, res) {
     const key = `${PREFIX}:users:${username}`;
 
     if (action === 'register') {
+      const totalUsers = Number(await redisCommand(['SCARD', `${PREFIX}:users`]) || 0);
+      if (totalUsers > 0) {
+        return send(res, 403, {
+          ok:false,
+          error:'Criação de login bloqueada. Já existe um usuário principal cadastrado.'
+        });
+      }
+
       const exists = await redisCommand(['EXISTS', key]);
       if (Number(exists) === 1) {
         return send(res, 409, { ok:false, error:'Esse usuário já existe.' });
@@ -118,7 +164,13 @@ module.exports = async function handler(req, res) {
         return send(res, 401, { ok:false, error:'Usuário ou senha incorretos.' });
       }
 
-      return send(res, 200, { ok:true, user:{username} });
+      const token = crypto.randomBytes(32).toString('hex');
+      await redisCommand(['SET', sessionKey(token), JSON.stringify({
+        username,
+        createdAt: new Date().toISOString()
+      }), 'EX', SESSION_TTL_SECONDS]);
+
+      return send(res, 200, { ok:true, user:{username}, token });
     }
 
     return send(res, 400, { ok:false, error:'Ação inválida.' });

@@ -116,12 +116,8 @@ function employeeExtraTotal(employeeId){
 }
 
 function getCurrentUsername(){
-  try{
-    const session = JSON.parse(sessionStorage.getItem(AUTH_SESSION_KEY) || 'null');
-    return session && session.username ? normalizeClientUsername(session.username) : 'sem-login';
-  }catch{
-    return 'sem-login';
-  }
+  const session = typeof getAuthSession === 'function' ? getAuthSession() : null;
+  return session && session.username ? normalizeClientUsername(session.username) : 'sem-login';
 }
 
 
@@ -498,7 +494,14 @@ let cloudDirty = false;
 let cloudSaveInFlight = false;
 let cloudPendingSave = false;
 let cloudRefreshInFlight = false;
+let inactivityTimer = null;
+let inactivityWarningTimer = null;
+let inactivityCountdownTimer = null;
+let inactivityLogoutRunning = false;
+let inactivityRemainingSeconds = 60;
 
+const INACTIVITY_TIMEOUT_MS = 10 * 60 * 1000;
+const INACTIVITY_WARNING_MS = 9 * 60 * 1000;
 const CLOUD_SAVE_DELAY_MS = 2500;
 const CLOUD_COMMIT_DELAY_MS = 1200;
 const CLOUD_REFRESH_INTERVAL_MS = 120000;
@@ -528,7 +531,7 @@ async function apiRequest(method, month, data){
 
   const options = {
     method,
-    headers:{'Content-Type':'application/json'}
+    headers:{'Content-Type':'application/json', ...getAuthHeaders()}
   };
 
   if (method !== 'GET') {
@@ -540,6 +543,11 @@ async function apiRequest(method, month, data){
   if(username === 'sem-login') return null;
   const response = await fetch(`/api/monthly-data?month=${encodeURIComponent(month)}&user=${encodeURIComponent(username)}`, options);
   if (!response.ok) {
+    if(response.status === 401){
+      handleAuthExpired();
+      throw new Error('Sessão expirada. Faça login novamente.');
+    }
+
     const errorText = await response.text().catch(()=>'');
     throw new Error(errorText || `Erro ${response.status}`);
   }
@@ -555,7 +563,7 @@ async function apiCurrentMonth(method='GET', month=null){
 
   const options = {
     method,
-    headers:{'Content-Type':'application/json'}
+    headers:{'Content-Type':'application/json', ...getAuthHeaders()}
   };
 
   if(method !== 'GET'){
@@ -564,7 +572,10 @@ async function apiCurrentMonth(method='GET', month=null){
   }
 
   const response = await fetch(`/api/monthly-data?month=current&user=${encodeURIComponent(username)}`, options);
-  if(!response.ok) return null;
+  if(!response.ok){
+    if(response.status === 401) handleAuthExpired();
+    return null;
+  }
   return response.json();
 }
 
@@ -1422,6 +1433,43 @@ const showRegister = document.getElementById('showRegister');
 const showLogin = document.getElementById('showLogin');
 const logoutBtn = document.getElementById('logoutBtn');
 
+let registrationLocked = false;
+
+function setRegisterAccess(locked){
+  registrationLocked = !!locked;
+
+  if(showRegister){
+    showRegister.hidden = registrationLocked;
+    showRegister.disabled = registrationLocked;
+    showRegister.setAttribute('aria-hidden', String(registrationLocked));
+  }
+
+  if(registrationLocked && registerForm?.classList.contains('active')){
+    showAuthForm('login');
+    setAuthMessage(loginMessage, 'Criação de login bloqueada. Use o usuário principal.', false);
+  }
+}
+
+async function checkRegistrationStatus(){
+  try{
+    let locked = false;
+
+    if(location.protocol === 'file:'){
+      const users = JSON.parse(localStorage.getItem('farmaisLocalUsers') || '{}');
+      locked = Object.keys(users).length > 0;
+    }else{
+      const response = await fetch('/api/auth', { method:'GET' });
+      const data = await response.json().catch(()=>({}));
+      locked = !!(data && (data.registrationLocked || data.hasUsers));
+    }
+
+    setRegisterAccess(locked);
+    return locked;
+  }catch{
+    return registrationLocked;
+  }
+}
+
 
 function setAuthMessage(el, message, success=false){
   if(!el) return;
@@ -1430,29 +1478,56 @@ function setAuthMessage(el, message, success=false){
 }
 
 function showAuthForm(form){
+  if(form === 'register' && registrationLocked){
+    form = 'login';
+    setAuthMessage(loginMessage, 'Criação de login bloqueada. Use o usuário principal.', false);
+  }else{
+    setAuthMessage(loginMessage, '');
+  }
+
   loginForm?.classList.toggle('active', form === 'login');
   registerForm?.classList.toggle('active', form === 'register');
-  setAuthMessage(loginMessage, '');
   setAuthMessage(registerMessage, '');
 }
 
-function isLoggedIn(){
+function getAuthSession(){
   try{
-    const session = JSON.parse(sessionStorage.getItem(AUTH_SESSION_KEY) || 'null');
-    return !!(session && session.username && session.loggedAt);
+    return JSON.parse(sessionStorage.getItem(AUTH_SESSION_KEY) || 'null') || null;
   }catch{
-    return false;
+    return null;
   }
+}
+
+function getAuthHeaders(){
+  const session = getAuthSession();
+  return session && session.token ? {'Authorization': `Bearer ${session.token}`} : {};
+}
+
+function handleAuthExpired(){
+  try{ stopAutoCloudSync(); }catch{}
+  try{ stopInactivityTimer(); }catch{}
+  appReady = false;
+  sessionStorage.removeItem(AUTH_SESSION_KEY);
+  localStorage.removeItem(AUTH_SESSION_KEY);
+  try{ lockApp(); }catch{}
+}
+
+function isLoggedIn(){
+  const session = getAuthSession();
+  return !!(session && session.username && session.loggedAt && session.token);
 }
 
 function unlockApp(){
   document.body.classList.remove('auth-locked');
+  startInactivityTimer();
 }
 
 function lockApp(){
+  stopInactivityTimer();
   document.body.classList.add('auth-locked');
   document.body.classList.remove('app-booting');
   showAuthForm('login');
+  checkRegistrationStatus();
 }
 
 function finishAppBoot(){
@@ -1465,14 +1540,15 @@ async function authRequest(action, username, password){
   function localAuth(){
     const users = JSON.parse(localStorage.getItem('farmaisLocalUsers') || '{}');
     if(action === 'register'){
+      if(Object.keys(users).length > 0) throw new Error('Criação de login bloqueada. Já existe um usuário principal cadastrado.');
       if(users[safeUsername]) throw new Error('Esse usuário já existe neste navegador.');
       users[safeUsername] = {password};
       localStorage.setItem('farmaisLocalUsers', JSON.stringify(users));
-      return {ok:true, user:{username:safeUsername}, local:true};
+      return {ok:true, user:{username:safeUsername}, token:'local-file-session', local:true};
     }
     if(action === 'login'){
       if(!users[safeUsername] || users[safeUsername].password !== password) throw new Error('Usuário ou senha incorretos.');
-      return {ok:true, user:{username:safeUsername}, local:true};
+      return {ok:true, user:{username:safeUsername}, token:'local-file-session', local:true};
     }
     throw new Error('Ação inválida.');
   }
@@ -1504,7 +1580,138 @@ async function authRequest(action, username, password){
   return data;
 }
 
-showRegister?.addEventListener('click', ()=>showAuthForm('register'));
+async function logoutServerSession(){
+  const session = getAuthSession();
+  if(!session || !session.token || location.protocol === 'file:') return;
+
+  try{
+    await fetch('/api/auth', {
+      method:'POST',
+      headers:{'Content-Type':'application/json', ...getAuthHeaders()},
+      body:JSON.stringify({action:'logout'}),
+      keepalive:true
+    });
+  }catch{}
+}
+
+function getInactivityWarningElements(){
+  return {
+    wrapper: document.getElementById('inactivityWarning'),
+    countdown: document.getElementById('inactivityCountdown'),
+    button: document.getElementById('keepSessionBtn')
+  };
+}
+
+function hideInactivityWarning(){
+  const {wrapper} = getInactivityWarningElements();
+  if(wrapper) wrapper.hidden = true;
+
+  if(inactivityCountdownTimer){
+    clearInterval(inactivityCountdownTimer);
+    inactivityCountdownTimer = null;
+  }
+}
+
+function showInactivityWarning(){
+  if(!isLoggedIn() || document.body.classList.contains('auth-locked')) return;
+
+  const {wrapper, countdown} = getInactivityWarningElements();
+  inactivityRemainingSeconds = Math.max(1, Math.ceil((INACTIVITY_TIMEOUT_MS - INACTIVITY_WARNING_MS) / 1000));
+
+  if(countdown) countdown.textContent = String(inactivityRemainingSeconds);
+  if(wrapper) wrapper.hidden = false;
+
+  if(inactivityCountdownTimer){
+    clearInterval(inactivityCountdownTimer);
+  }
+
+  inactivityCountdownTimer = setInterval(()=>{
+    inactivityRemainingSeconds -= 1;
+    if(countdown) countdown.textContent = String(Math.max(0, inactivityRemainingSeconds));
+    if(inactivityRemainingSeconds <= 0){
+      clearInterval(inactivityCountdownTimer);
+      inactivityCountdownTimer = null;
+    }
+  }, 1000);
+}
+
+function stopInactivityTimer(){
+  if(inactivityTimer){
+    clearTimeout(inactivityTimer);
+    inactivityTimer = null;
+  }
+
+  if(inactivityWarningTimer){
+    clearTimeout(inactivityWarningTimer);
+    inactivityWarningTimer = null;
+  }
+
+  hideInactivityWarning();
+}
+
+function resetInactivityTimer(){
+  if(!isLoggedIn() || document.body.classList.contains('auth-locked')) return;
+
+  stopInactivityTimer();
+
+  inactivityWarningTimer = setTimeout(()=>{
+    showInactivityWarning();
+  }, INACTIVITY_WARNING_MS);
+
+  inactivityTimer = setTimeout(()=>{
+    performAutoLogoutByInactivity();
+  }, INACTIVITY_TIMEOUT_MS);
+}
+
+function startInactivityTimer(){
+  stopInactivityTimer();
+  if(isLoggedIn()) resetInactivityTimer();
+}
+
+document.addEventListener('click', (event)=>{
+  if(event.target && event.target.id === 'keepSessionBtn'){
+    resetInactivityTimer();
+  }
+});
+
+async function performAutoLogoutByInactivity(){
+  if(inactivityLogoutRunning || !isLoggedIn()) return;
+
+  inactivityLogoutRunning = true;
+  try{
+    stopAutoCloudSync();
+    stopInactivityTimer();
+
+    if(cloudDirty){
+      saveLocal();
+      await saveToUpstash(true);
+    }
+
+    await logoutServerSession();
+
+    appReady = false;
+    sessionStorage.removeItem(AUTH_SESSION_KEY);
+    localStorage.removeItem(AUTH_SESSION_KEY);
+    lockApp();
+    setAuthMessage(loginMessage, 'Sessão encerrada por inatividade. Faça login novamente.');
+  }finally{
+    inactivityLogoutRunning = false;
+  }
+}
+
+['pointerdown','keydown','input','change','touchstart','scroll'].forEach(eventName=>{
+  window.addEventListener(eventName, resetInactivityTimer, {passive:true, capture:true});
+});
+
+showRegister?.addEventListener('click', async ()=>{
+  const locked = await checkRegistrationStatus();
+  if(locked){
+    showAuthForm('login');
+    setAuthMessage(loginMessage, 'Criação de login bloqueada. Use o usuário principal.', false);
+    return;
+  }
+  showAuthForm('register');
+});
 showLogin?.addEventListener('click', ()=>showAuthForm('login'));
 
 loginForm?.addEventListener('submit', async e=>{
@@ -1519,8 +1726,8 @@ loginForm?.addEventListener('submit', async e=>{
 
   setAuthMessage(loginMessage, 'Entrando...');
   try{
-    await authRequest('login', username, password);
-    sessionStorage.setItem(AUTH_SESSION_KEY, JSON.stringify({username:normalizeClientUsername(username), loggedAt:new Date().toISOString()}));
+    const data = await authRequest('login', username, password);
+    sessionStorage.setItem(AUTH_SESSION_KEY, JSON.stringify({username:normalizeClientUsername(username), token:data.token || 'local-file-session', loggedAt:new Date().toISOString()}));
     setAuthMessage(loginMessage, 'Login realizado com sucesso.', true);
     unlockApp();
 
@@ -1528,6 +1735,7 @@ loginForm?.addEventListener('submit', async e=>{
     await loadMonth(monthToLoad);
     appReady = true;
     startAutoCloudSync();
+    startInactivityTimer();
 
     loginForm.reset();
   }catch(err){
@@ -1557,6 +1765,7 @@ registerForm?.addEventListener('submit', async e=>{
   setAuthMessage(registerMessage, 'Criando login...');
   try{
     await authRequest('register', username, password);
+    setRegisterAccess(true);
     setAuthMessage(registerMessage, 'Login criado. Agora entre com seu usuário.', true);
     registerForm.reset();
     setTimeout(()=>showAuthForm('login'), 900);
@@ -1567,8 +1776,10 @@ registerForm?.addEventListener('submit', async e=>{
 
 logoutBtn?.addEventListener('click', async ()=>{
   stopAutoCloudSync();
+  stopInactivityTimer();
   saveLocal();
   await saveToUpstash(true);
+  await logoutServerSession();
   appReady = false;
   sessionStorage.removeItem(AUTH_SESSION_KEY);
   localStorage.removeItem(AUTH_SESSION_KEY);
@@ -1580,6 +1791,8 @@ if(isLoggedIn()){
 }else{
   lockApp();
 }
+
+checkRegistrationStatus();
 
 function renderSettings(){
   mesReferencia.value=state.settings.month;
@@ -1926,6 +2139,7 @@ if(isLoggedIn()){
   initCloudSync().then(()=>{
     appReady = true;
     startAutoCloudSync();
+    startInactivityTimer();
   });
 }else{
   appReady = true;

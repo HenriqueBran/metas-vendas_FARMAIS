@@ -273,5 +273,14 @@
   </nav>
 
   <script src="app.js"></script>
+
+  <div id="inactivityWarning" class="inactivity-warning" aria-live="polite" aria-modal="true" role="dialog" hidden>
+    <div class="inactivity-card">
+      <strong>Sessão quase encerrando</strong>
+      <p>Você está sem interação há alguns minutos. Por segurança, sua sessão será encerrada em <span id="inactivityCountdown">60</span> segundos.</p>
+      <button id="keepSessionBtn" type="button">Continuar sessão</button>
+    </div>
+  </div>
+
 </body>
 </html>
