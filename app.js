@@ -704,6 +704,20 @@ document.addEventListener('visibilitychange', ()=>{
 });
 
 function daysInMonth(month){const [y,m]=month.split('-').map(Number);return new Date(y,m,0).getDate();}
+
+function isSundayInMonth(day, month=state.settings.month){
+  const [year, monthNumber] = String(month || '').split('-').map(Number);
+  const dayNumber = Number(day);
+  if(!year || !monthNumber || !dayNumber) return false;
+  return new Date(year, monthNumber - 1, dayNumber).getDay() === 0;
+}
+
+function shouldAutoFillSunday(value){
+  const special = normalizeSpecialValue(value);
+  if(special) return special === 'folga';
+  return value === undefined || value === null || value === '' || value === 0 || value === '0';
+}
+
 function ensureDays(){
   const total=daysInMonth(state.settings.month);
   let changed=false;
@@ -733,9 +747,19 @@ function ensureDays(){
       changed=true;
     }
 
+    const isSunday = isSundayInMonth(d);
+
     state.employees.forEach(e=>{
       if(state.sales[d][e.id] === undefined){
-        state.sales[d][e.id]=0;
+        state.sales[d][e.id] = isSunday ? 'folga' : 0;
+        changed=true;
+        return;
+      }
+
+      // Domingos são preenchidos automaticamente como Folga.
+      // Não sobrescreve venda digitada, Falta ou Atestado.
+      if(isSunday && shouldAutoFillSunday(state.sales[d][e.id]) && state.sales[d][e.id] !== 'folga'){
+        state.sales[d][e.id] = 'folga';
         changed=true;
       }
     });
@@ -1520,7 +1544,9 @@ function renderEmployees(){
 addEmployee.onclick=()=>{
   const emp={id:employeeId(),name:'',role:'',percent:0,target:0,daily:0};
   state.employees.push(emp);
-  Object.values(state.sales).forEach(row=>row[emp.id]=0);
+  Object.entries(state.sales).forEach(([day,row])=>{
+    row[emp.id] = isSundayInMonth(day) ? 'folga' : 0;
+  });
   state.extraTotals ||= {};
   state.extraTotals[emp.id] = {};
   EXTRA_SALES_CATEGORIES.forEach(cat=>state.extraTotals[emp.id][cat.key]=0);
@@ -1533,7 +1559,8 @@ generateDays.onclick=()=>{
   ensureDays();
   Object.keys(state.sales).forEach(day=>{
     delete state.sales[day].__status;
-    state.employees.forEach(e=>{ state.sales[day][e.id] = 0; });
+    const isSunday = isSundayInMonth(day);
+    state.employees.forEach(e=>{ state.sales[day][e.id] = isSunday ? 'folga' : 0; });
   });
   save();
 };
