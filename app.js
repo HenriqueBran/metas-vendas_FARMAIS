@@ -31,6 +31,12 @@ function parseVal(v){
 
 const AUTH_SESSION_KEY = 'farmaisAuthSession';
 
+/* Sessão por aba:
+   - F5 mantém o login.
+   - Fechar a aba encerra a sessão automaticamente.
+   - Dados continuam salvos no Upstash/localStorage por usuário e mês. */
+try{ localStorage.removeItem(AUTH_SESSION_KEY); }catch{}
+
 const EXTRA_SALES_CATEGORIES = [
   {key:'ppv', label:'PPV'},
   {key:'genericoSimilar', label:'GENÉRICO/SIMILAR'},
@@ -83,7 +89,7 @@ function employeeExtraTotal(employeeId){
 
 function getCurrentUsername(){
   try{
-    const session = JSON.parse(localStorage.getItem(AUTH_SESSION_KEY) || 'null');
+    const session = JSON.parse(sessionStorage.getItem(AUTH_SESSION_KEY) || 'null');
     return session && session.username ? normalizeClientUsername(session.username) : 'sem-login';
   }catch{
     return 'sem-login';
@@ -199,6 +205,28 @@ function currentMonthKey(username=getCurrentUsername()){
 
 function storageKey(month, username=getCurrentUsername()){
   return `${STORAGE_PREFIX}:${username}:${month}`;
+}
+
+const VALID_SCREENS = ['resultados','metas','lancamentos','extras'];
+
+function activeScreenKey(username=getCurrentUsername()){
+  return `${STORAGE_PREFIX}:activeScreen:${username}`;
+}
+
+function getSavedScreen(){
+  try{
+    const saved = localStorage.getItem(activeScreenKey());
+    return VALID_SCREENS.includes(saved) ? saved : 'resultados';
+  }catch{
+    return 'resultados';
+  }
+}
+
+function setSavedScreen(id){
+  if(!VALID_SCREENS.includes(id)) return;
+  try{
+    localStorage.setItem(activeScreenKey(), id);
+  }catch{}
 }
 
 function cloneState(obj){
@@ -486,7 +514,7 @@ function stateHasMeaningfulData(candidate){
 }
 
 async function loadMonth(month){
-  const previousScreen = document.querySelector('.screen.active')?.id || 'resultados';
+  const previousScreen = document.querySelector('.screen.active')?.id || getSavedScreen();
   const targetMonth = month || currentMonth();
 
   const cloudState = await loadFromUpstash(targetMonth);
@@ -692,7 +720,9 @@ function setPrintButtonLabel(text){
   printBtn.innerHTML = `${downloadIconHtml}<span>${text}</span>`;
 }
 
-function switchScreen(id){
+function switchScreen(id, persist=true){
+  if(!VALID_SCREENS.includes(id)) id = 'resultados';
+  if(persist) setSavedScreen(id);
   document.querySelectorAll('.screen').forEach(el=>el.classList.remove('active'));
   document.querySelectorAll('.nav').forEach(el=>el.classList.remove('active'));
   document.getElementById(id).classList.add('active');
@@ -1133,7 +1163,7 @@ function showAuthForm(form){
 
 function isLoggedIn(){
   try{
-    const session = JSON.parse(localStorage.getItem(AUTH_SESSION_KEY) || 'null');
+    const session = JSON.parse(sessionStorage.getItem(AUTH_SESSION_KEY) || 'null');
     return !!(session && session.username && session.loggedAt);
   }catch{
     return false;
@@ -1210,7 +1240,7 @@ loginForm?.addEventListener('submit', async e=>{
   setAuthMessage(loginMessage, 'Entrando...');
   try{
     await authRequest('login', username, password);
-    localStorage.setItem(AUTH_SESSION_KEY, JSON.stringify({username:normalizeClientUsername(username), loggedAt:new Date().toISOString()}));
+    sessionStorage.setItem(AUTH_SESSION_KEY, JSON.stringify({username:normalizeClientUsername(username), loggedAt:new Date().toISOString()}));
     setAuthMessage(loginMessage, 'Login realizado com sucesso.', true);
     unlockApp();
 
@@ -1260,6 +1290,7 @@ logoutBtn?.addEventListener('click', async ()=>{
   saveLocal();
   await saveToUpstash(true);
   appReady = false;
+  sessionStorage.removeItem(AUTH_SESSION_KEY);
   localStorage.removeItem(AUTH_SESSION_KEY);
   lockApp();
 });
@@ -1617,5 +1648,5 @@ if(isLoggedIn()){
 }else{
   appReady = true;
   renderAll();
-  switchScreen('resultados');
+  switchScreen(getSavedScreen(), false);
 }
