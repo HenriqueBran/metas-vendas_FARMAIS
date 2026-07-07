@@ -1562,7 +1562,7 @@ function renderResults(){
   statusMeta.textContent=attainment>=100?'Meta batida':'Em andamento';
   metaDiariaLoja.textContent=brl(goal/Math.max(1,state.settings.workDays));
   diasLancados.textContent=`${launched} / ${days}`;
-  projecaoMes.textContent=brl(projection || sold);
+  if (typeof projecaoMes !== 'undefined' && projecaoMes) projecaoMes.textContent=brl(projection || sold);
   premiacaoProjetada.textContent=brl(totalPrize);
   const percentSum=state.employees.reduce((s,e)=>s+parseVal(e.percent),0);
   percentWarning.textContent=Math.abs(percentSum-100)>.01?'':'';
