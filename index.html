@@ -4,6 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Farmais Tietê | Metas e Vendas</title>
+  <link rel="icon" type="image/png" href="favicon.png" />
+  <link rel="apple-touch-icon" href="favicon.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
@@ -200,7 +202,7 @@
           <h3>Configuração do mês</h3>
           <div class="form-grid">
             <label>Mês de referência<input id="mesReferencia" type="month"></label>
-            <label>Dias de trabalho<input id="diasTrabalho" type="number" min="1" max="31"></label>
+            <label>Dias de trabalho<input id="diasTrabalho" type="text" inputmode="numeric" autocomplete="off" placeholder="0"></label>
             <label>Meta do mês<input id="metaMes" type="text" inputmode="decimal" autocomplete="off" placeholder="0,00"></label>
             <label>Premiação projetada<input id="premiacao" type="text" inputmode="decimal" autocomplete="off" placeholder="0,00"></label>
           </div>

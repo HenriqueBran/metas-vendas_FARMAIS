@@ -472,6 +472,19 @@ document.addEventListener('visibilitychange', ()=>{
 });
 
 
+function stateHasMeaningfulData(candidate){
+  if(!candidate || typeof candidate !== 'object') return false;
+  const settings = candidate.settings || {};
+  if(parseVal(settings.workDays) > 0 || parseVal(settings.monthlyGoal) > 0 || parseVal(settings.prize) > 0) return true;
+  if(Array.isArray(candidate.employees) && candidate.employees.length > 0) return true;
+  const sales = candidate.sales || {};
+  const hasSales = Object.values(sales).some(row => row && typeof row === 'object' && Object.entries(row).some(([key,value]) => key !== '__status' && (parseVal(value) > 0 || normalizeSpecialValue(value))));
+  if(hasSales) return true;
+  const extraTotals = candidate.extraTotals || {};
+  const hasExtras = Object.values(extraTotals).some(row => row && typeof row === 'object' && Object.values(row).some(value => parseVal(value) > 0));
+  return hasExtras;
+}
+
 async function loadMonth(month){
   const previousScreen = document.querySelector('.screen.active')?.id || 'resultados';
   const targetMonth = month || currentMonth();
@@ -485,8 +498,12 @@ async function loadMonth(month){
   if(cloudState && localState){
     const cloudTime = cloudState.updatedAt ? Date.parse(cloudState.updatedAt) : 0;
     const localTime = localState.updatedAt ? Date.parse(localState.updatedAt) : 0;
+    const cloudHasData = stateHasMeaningfulData(cloudState);
+    const localHasData = stateHasMeaningfulData(localState);
 
-    if(localTime > cloudTime){
+    // A nuvem é a fonte principal. Só usamos o local para recuperar algo mais novo
+    // se ele realmente tiver dados. Isso evita F5/estado vazio apagar a nuvem.
+    if(localTime > cloudTime && localHasData && (!cloudHasData || localTime - cloudTime > 1000)){
       selectedState = localState;
       shouldSendLocalToCloud = true;
     }else{
@@ -684,7 +701,7 @@ function switchScreen(id){
     resultados:['Resultados','Resumo geral das vendas, metas e desempenho.'],
     metas:['Metas do mês','Configure meta, premiação e distribuição por funcionário.'],
     lancamentos:['Lançamentos diários','Informe as vendas por dia e por funcionário.'],
-    extras:['Vendas extras','Lance PPV, Genérico, Similar, Vitamina, Aplicação e Perfuração lóbulo.']
+    extras:['Vendas extras','Lance PPV, Genérico/Similar, Vitamina, Aplicação e Perfuração lóbulo.']
   };
   screenTitle.textContent=titles[id][0];
   screenSubtitle.textContent=titles[id][1];
@@ -744,7 +761,7 @@ if (printCurrentBtn) {
 }
 
 window.addEventListener('afterprint', () => {
-  document.body.classList.remove('print-mode', 'print-resultados', 'print-lancamentos');
+  document.body.classList.remove('print-mode', 'print-resultados', 'print-lancamentos', 'print-extras');
 });
 
 
@@ -1255,9 +1272,9 @@ if(isLoggedIn()){
 
 function renderSettings(){
   mesReferencia.value=state.settings.month;
-  diasTrabalho.value=state.settings.workDays;
-  if (document.activeElement !== metaMes) metaMes.value=formatInputDecimal(state.settings.monthlyGoal);
-  if (document.activeElement !== premiacao) premiacao.value=formatInputDecimal(state.settings.prize);
+  diasTrabalho.value=state.settings.workDays ? state.settings.workDays : '';
+  if (document.activeElement !== metaMes) metaMes.value=state.settings.monthlyGoal ? formatInputDecimal(state.settings.monthlyGoal) : '';
+  if (document.activeElement !== premiacao) premiacao.value=state.settings.prize ? formatInputDecimal(state.settings.prize) : '';
 }
 function bindSettings(){
   mesReferencia.onchange=async e=>{
@@ -1271,7 +1288,10 @@ function bindSettings(){
     e.target.value=sanitizeNumberInput(e.target.value);
     state.settings.workDays=parseVal(e.target.value);
     recalcEmployeeGoals();
-    save();
+    saveLocal();
+    scheduleCloudSave();
+    renderEmployees();
+    renderResults();
   };
 
   metaMes.oninput=e=>{
