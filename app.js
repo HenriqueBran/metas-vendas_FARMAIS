@@ -30,6 +30,20 @@ function parseVal(v){
 }
 
 const AUTH_SESSION_KEY = 'farmaisAuthSession';
+/* Sessão: mantém login apenas no F5/reload.
+   Se acessar o link novamente, digitar a URL ou abrir uma nova navegação, força login. */
+try{
+  const navType = performance.getEntriesByType && performance.getEntriesByType('navigation')[0]
+    ? performance.getEntriesByType('navigation')[0].type
+    : (performance.navigation && performance.navigation.type === 1 ? 'reload' : 'navigate');
+
+  if(navType !== 'reload'){
+    sessionStorage.removeItem(AUTH_SESSION_KEY);
+  }
+}catch{
+  sessionStorage.removeItem(AUTH_SESSION_KEY);
+}
+
 
 /* Reset total do sistema - reset-2026-07-07
    Usa um novo namespace local para iniciar tudo limpo.
