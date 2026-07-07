@@ -124,6 +124,9 @@
       <button class="nav" data-screen="lancamentos" type="button">
         <span class="nav-ico calendar"></span><span>Lançamentos diários</span>
       </button>
+      <button class="nav" data-screen="extras" type="button">
+        <span class="nav-ico extra"></span><span>Vendas extras</span>
+      </button>
     </nav>
   </aside>
 
@@ -232,6 +235,22 @@
           </div>
         </div>
       </section>
+
+      <section id="extras" class="screen">
+        <div class="panel">
+          <div class="panel-head">
+            <h3>Vendas extras</h3>
+            <button id="clearExtraSales" class="secondary" type="button">Limpar vendas extras</button>
+          </div>
+          <p class="hint">Adicione o valor total do mês por funcionário em cada categoria: PPV, Genérico/Similar, Vitamina, Aplicação e Perfuração lóbulo.</p>
+          <div class="table-wrap extra-wrap">
+            <table id="extraTable">
+              <thead id="extraHead"></thead>
+              <tbody id="extraBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
     </main>
   </div>
 
@@ -255,6 +274,10 @@
     <button class="nav" data-screen="lancamentos" type="button">
       <span class="nav-ico calendar"></span>
       <small>Lançamentos</small>
+    </button>
+    <button class="nav" data-screen="extras" type="button">
+      <span class="nav-ico extra"></span>
+      <small>Extras</small>
     </button>
   </nav>
 

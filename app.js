@@ -31,6 +31,14 @@ function parseVal(v){
 
 const AUTH_SESSION_KEY = 'farmaisAuthSession';
 
+const EXTRA_SALES_CATEGORIES = [
+  {key:'ppv', label:'PPV'},
+  {key:'genericoSimilar', label:'GENÉRICO/SIMILAR'},
+  {key:'vitamina', label:'VITAMINA'},
+  {key:'aplicacao', label:'APLICAÇÃO'},
+  {key:'perfuracaoLobulo', label:'PERFURAÇÃO LÓBULO'}
+];
+
 function normalizeClientUsername(username){
   return String(username || '')
     .trim()
@@ -40,6 +48,37 @@ function normalizeClientUsername(username){
     .replace(/\s+/g,'-')
     .replace(/[^a-z0-9._-]/g,'')
     .slice(0,60) || 'sem-login';
+}
+
+
+function normalizeExtraTotalsForEmployee(employeeId){
+  state.extraTotals ||= {};
+  state.extraTotals[employeeId] ||= {};
+
+  const row = state.extraTotals[employeeId];
+  const legacyGeneric = parseVal(row.generico);
+  const legacySimilar = parseVal(row.similar);
+  const currentCombined = parseVal(row.genericoSimilar);
+
+  // Migra valores antigos de GENÉRICO e SIMILAR para o campo único.
+  // Remove as chaves antigas para não somar duas vezes em próximos salvamentos.
+  if((legacyGeneric || legacySimilar) && !currentCombined){
+    row.genericoSimilar = Number((legacyGeneric + legacySimilar).toFixed(2));
+  }
+
+  delete row.generico;
+  delete row.similar;
+
+  EXTRA_SALES_CATEGORIES.forEach(cat=>{
+    if(row[cat.key] === undefined){
+      row[cat.key] = 0;
+    }
+  });
+}
+
+function employeeExtraTotal(employeeId){
+  const row = state.extraTotals && state.extraTotals[employeeId] ? state.extraTotals[employeeId] : {};
+  return EXTRA_SALES_CATEGORIES.reduce((sum,cat)=>sum + parseVal(row[cat.key]), 0);
 }
 
 function getCurrentUsername(){
@@ -146,17 +185,10 @@ function employeeId(){
 }
 
 const defaultState = {
-  settings:{month:currentMonth(), workDays:25, monthlyGoal:145000, prize:1500},
-  employees:[
-    {id:employeeId(), name:'Cristiana', role:'Balconista', percent:15, target:20715, daily:828.57},
-    {id:employeeId(), name:'Genivaldo', role:'Farmacêutico', percent:15, target:20715, daily:828.57},
-    {id:employeeId(), name:'Nadia', role:'Farmacêutico', percent:15, target:20715, daily:828.57},
-    {id:employeeId(), name:'Arnobio', role:'Farmacêutico', percent:15, target:20715, daily:828.57},
-    {id:employeeId(), name:'Lucas', role:'Atendente', percent:15, target:20715, daily:828.57},
-    {id:employeeId(), name:'Nalva', role:'Atendente', percent:15, target:20715, daily:828.57},
-    {id:employeeId(), name:'Fernanda', role:'Atendente', percent:15, target:20715, daily:828.57}
-  ],
+  settings:{month:currentMonth(), workDays:0, monthlyGoal:0, prize:0},
+  employees:[],
   sales:{},
+  extraTotals:{},
   updatedAt:null
 };
 
@@ -178,13 +210,16 @@ function normalizeState(raw, month){
   const data = raw && typeof raw === 'object' ? raw : {};
   const normalized = {
     settings:{...base.settings, ...(data.settings || {})},
-    employees:Array.isArray(data.employees) && data.employees.length ? data.employees : base.employees,
+    employees:Array.isArray(data.employees) ? data.employees : base.employees,
     sales:data.sales && typeof data.sales === 'object' ? data.sales : {},
+    extraTotals:data.extraTotals && typeof data.extraTotals === 'object'
+      ? data.extraTotals
+      : (data.extraSalesTotals && typeof data.extraSalesTotals === 'object' ? data.extraSalesTotals : {}),
     updatedAt:data.updatedAt || null
   };
 
   normalized.settings.month = month || normalized.settings.month || currentMonth();
-  normalized.settings.workDays = parseVal(normalized.settings.workDays) || 25;
+  normalized.settings.workDays = parseVal(normalized.settings.workDays);
   normalized.settings.monthlyGoal = parseVal(normalized.settings.monthlyGoal);
   normalized.settings.prize = parseVal(normalized.settings.prize);
 
@@ -200,12 +235,51 @@ function normalizeState(raw, month){
 
     return {
       id:e.id || employeeId(),
-      name:e.name || 'Funcionário',
-      role:e.role || '',
+      name:e.name ?? '',
+      role:e.role ?? '',
       percent:parseVal(e.percent),
       target,
       daily
     };
+  });
+
+  // Migração: versões anteriores tinham vendas extras por dia.
+  // Agora a aba de extras guarda somente o total mensal por funcionário/categoria.
+  if(Object.keys(normalized.extraTotals).length === 0 && data.extraSales && typeof data.extraSales === 'object'){
+    Object.values(data.extraSales).forEach(dayRow=>{
+      if(!dayRow || typeof dayRow !== 'object') return;
+      Object.entries(dayRow).forEach(([employeeId, cats])=>{
+        if(!cats || typeof cats !== 'object') return;
+        normalized.extraTotals[employeeId] ||= {};
+        normalized.extraTotals[employeeId].ppv = parseVal(normalized.extraTotals[employeeId].ppv) + parseVal(cats.ppv);
+        normalized.extraTotals[employeeId].genericoSimilar = parseVal(normalized.extraTotals[employeeId].genericoSimilar) + parseVal(cats.genericoSimilar) + parseVal(cats.generico) + parseVal(cats.similar);
+        normalized.extraTotals[employeeId].vitamina = parseVal(normalized.extraTotals[employeeId].vitamina) + parseVal(cats.vitamina);
+        normalized.extraTotals[employeeId].aplicacao = parseVal(normalized.extraTotals[employeeId].aplicacao) + parseVal(cats.aplicacao);
+        normalized.extraTotals[employeeId].perfuracaoLobulo = parseVal(normalized.extraTotals[employeeId].perfuracaoLobulo) + parseVal(cats.perfuracaoLobulo);
+      });
+    });
+  }
+
+  normalized.employees.forEach(e=>{
+    normalized.extraTotals[e.id] ||= {};
+
+    const row = normalized.extraTotals[e.id];
+    const legacyGeneric = parseVal(row.generico);
+    const legacySimilar = parseVal(row.similar);
+    const currentCombined = parseVal(row.genericoSimilar);
+
+    if((legacyGeneric || legacySimilar) && !currentCombined){
+      row.genericoSimilar = Number((legacyGeneric + legacySimilar).toFixed(2));
+    }
+
+    delete row.generico;
+    delete row.similar;
+
+    EXTRA_SALES_CATEGORIES.forEach(cat=>{
+      if(row[cat.key] === undefined){
+        row[cat.key] = 0;
+      }
+    });
   });
 
   return normalized;
@@ -215,8 +289,9 @@ function createMonthState(month, baseState){
   const base = baseState ? cloneState(baseState) : cloneState(defaultState);
   return normalizeState({
     settings:{...base.settings, month},
-    employees:base.employees,
+    employees:Array.isArray(base.employees) ? base.employees : [],
     sales:{},
+    extraTotals:{},
     updatedAt:new Date().toISOString()
   }, month);
 }
@@ -490,8 +565,17 @@ function ensureDays(){
   const total=daysInMonth(state.settings.month);
   let changed=false;
 
+  if(!state.sales || typeof state.sales !== 'object'){
+    state.sales={};
+    changed=true;
+  }
+
+  if(!state.extraTotals || typeof state.extraTotals !== 'object'){
+    state.extraTotals={};
+    changed=true;
+  }
+
   // Remove dias que não existem no mês selecionado.
-  // Ex.: setembro tem 30 dias, então o dia 31 é removido automaticamente.
   Object.keys(state.sales).forEach(day=>{
     if(Number(day)>total){
       delete state.sales[day];
@@ -499,12 +583,13 @@ function ensureDays(){
     }
   });
 
-  // Garante que todos os dias válidos do mês existam.
+  // Garante que todos os dias válidos do mês existam para lançamentos diários.
   for(let d=1;d<=total;d++){
     if(!state.sales[d]){
       state.sales[d]={};
       changed=true;
     }
+
     state.employees.forEach(e=>{
       if(state.sales[d][e.id] === undefined){
         state.sales[d][e.id]=0;
@@ -512,6 +597,25 @@ function ensureDays(){
       }
     });
   }
+
+  // Garante totais mensais das vendas extras por funcionário e categoria.
+  const employeeIds = new Set(state.employees.map(e=>e.id));
+
+  Object.keys(state.extraTotals).forEach(id=>{
+    if(!employeeIds.has(id)){
+      delete state.extraTotals[id];
+      changed=true;
+    }
+  });
+
+  state.employees.forEach(e=>{
+    const before = JSON.stringify(state.extraTotals[e.id] || {});
+    normalizeExtraTotalsForEmployee(e.id);
+    const after = JSON.stringify(state.extraTotals[e.id] || {});
+    if(before !== after){
+      changed=true;
+    }
+  });
 
   if(changed){
     saveLocal();
@@ -557,7 +661,8 @@ function switchScreen(id){
   const titles={
     resultados:['Resultados','Resumo geral das vendas, metas e desempenho.'],
     metas:['Metas do mês','Configure meta, premiação e distribuição por funcionário.'],
-    lancamentos:['Lançamentos diários','Informe as vendas por dia e por funcionário.']
+    lancamentos:['Lançamentos diários','Informe as vendas por dia e por funcionário.'],
+    extras:['Vendas extras','Lance PPV, Genérico, Similar, Vitamina, Aplicação e Perfuração lóbulo.']
   };
   screenTitle.textContent=titles[id][0];
   screenSubtitle.textContent=titles[id][1];
@@ -574,6 +679,10 @@ function switchScreen(id){
       setPrintButtonLabel('Imprimir lançamentos');
       printBtn.classList.remove('hidden-print-cta');
       printBtn.dataset.printScreen = 'lancamentos';
+    } else if (id === 'extras') {
+      setPrintButtonLabel('Imprimir vendas extras');
+      printBtn.classList.remove('hidden-print-cta');
+      printBtn.dataset.printScreen = 'extras';
     } else {
       printBtn.classList.add('hidden-print-cta');
       printBtn.dataset.printScreen = '';
@@ -665,12 +774,23 @@ function voucherPeriod(){
 function voucherRows(){
   const sold = totalSold();
   const totalPrize = parseVal(state.settings.prize);
+
   return state.employees.map(employee => {
     const employeeSale = employeeSold(employee.id);
-    const prize = sold > 0 ? (employeeSale / sold) * totalPrize : 0;
+
+    // Premiação normal continua igual à tela de Resultados.
+    const rankingPrize = sold > 0 ? (employeeSale / sold) * totalPrize : 0;
+
+    // Vendas extras entram somente no PDF dos comprovantes.
+    // Elas não alteram ranking, atingimento ou premiação da tela.
+    const extrasTotal = employeeExtraTotal(employee.id);
+    const voucherTotal = rankingPrize + extrasTotal;
+
     return {
       name: voucherEmployeeName(employee),
-      prize,
+      prize: voucherTotal,
+      rankingPrize,
+      extrasTotal,
       employeeSale
     };
   });
@@ -1190,6 +1310,7 @@ function renderEmployees(){
           saveLocal();
           scheduleCloudSave();
           renderDaily();
+          renderExtraSales();
           renderResults();
           return;
         }
@@ -1222,6 +1343,7 @@ function renderEmployees(){
       if(confirm('Remover este funcionário?')){
         state.employees=state.employees.filter(x=>x.id!==e.id);
         Object.values(state.sales).forEach(row=>delete row[e.id]);
+        if(state.extraTotals) delete state.extraTotals[e.id];
         recalcEmployeeGoals();
         save();
       }
@@ -1231,9 +1353,12 @@ function renderEmployees(){
   });
 }
 addEmployee.onclick=()=>{
-  const emp={id:employeeId(),name:'Novo funcionário',role:'Cargo',percent:0,target:0,daily:0};
+  const emp={id:employeeId(),name:'',role:'',percent:0,target:0,daily:0};
   state.employees.push(emp);
   Object.values(state.sales).forEach(row=>row[emp.id]=0);
+  state.extraTotals ||= {};
+  state.extraTotals[emp.id] = {};
+  EXTRA_SALES_CATEGORIES.forEach(cat=>state.extraTotals[emp.id][cat.key]=0);
   recalcEmployeeGoals();
   save();
 };
@@ -1247,6 +1372,61 @@ generateDays.onclick=()=>{
   });
   save();
 };
+
+
+const clearExtraSalesBtn = document.getElementById('clearExtraSales');
+
+if(clearExtraSalesBtn){
+  clearExtraSalesBtn.onclick=()=>{
+    if(!confirm('Deseja limpar todas as vendas extras do mês?')) return;
+    ensureDays();
+    state.employees.forEach(e=>{
+      state.extraTotals[e.id] ||= {};
+      EXTRA_SALES_CATEGORIES.forEach(cat=>{ state.extraTotals[e.id][cat.key] = 0; });
+    });
+    save();
+  };
+}
+
+function extraCellValue(v){
+  if(v === undefined || v === null || v === 0 || v === '0') return '';
+  return String(v);
+}
+
+function renderExtraSales(){
+  ensureDays();
+
+  const extraHead = document.getElementById('extraHead');
+  const extraBody = document.getElementById('extraBody');
+  if(!extraHead || !extraBody) return;
+
+  extraHead.innerHTML = '<tr><th>Funcionário</th>' + EXTRA_SALES_CATEGORIES.map(cat=>`<th>${cat.label}</th>`).join('') + '</tr>';
+  extraBody.innerHTML = '';
+
+  state.employees.forEach(e=>{
+    normalizeExtraTotalsForEmployee(e.id);
+    const tr=document.createElement('tr');
+
+    tr.innerHTML = `<td class="employee-name-cell">${e.name}</td>` + EXTRA_SALES_CATEGORIES.map(cat=>{
+      const value = extraCellValue(state.extraTotals[e.id][cat.key]);
+      return `<td><input type="text" inputmode="decimal" autocomplete="off" value="${value}" data-id="${e.id}" data-cat="${cat.key}" placeholder="0,00"></td>`;
+    }).join('');
+
+    tr.querySelectorAll('input').forEach(inp=>{
+      inp.oninput=ev=>{
+        ev.target.value=sanitizeNumberInput(ev.target.value);
+        const employeeId = ev.target.dataset.id;
+        const catKey = ev.target.dataset.cat;
+        state.extraTotals[employeeId] ||= {};
+        state.extraTotals[employeeId][catKey] = ev.target.value;
+        saveLocal();
+        scheduleCloudSave();
+      };
+    });
+
+    extraBody.appendChild(tr);
+  });
+}
 
 function renderDaily(){
   ensureDays();
@@ -1382,7 +1562,7 @@ function renderResults(){
   });
 }
 
-function renderAll(){ensureDays();recalcEmployeeGoals();renderSettings();renderEmployees();renderDaily();renderResults();}
+function renderAll(){ensureDays();recalcEmployeeGoals();renderSettings();renderEmployees();renderDaily();renderExtraSales();renderResults();}
 bindSettings();
 renderAll();
 switchScreen('resultados');
