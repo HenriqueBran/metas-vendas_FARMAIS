@@ -85,6 +85,10 @@ main{margin-left:var(--sidebar-width);padding:40px 44px 34px 42px;min-height:100
 .mini-item span{margin:0 0 7px;font-size:16px}
 .mini-item strong{font-size:23px;color:var(--blue);font-weight:900;letter-spacing:-.4px}
 
+.progress-panel .mini-grid{grid-template-columns:repeat(3,minmax(260px,320px));justify-content:center}
+.progress-panel .mini-item:first-child{padding-left:28px}
+.progress-panel .mini-item:last-child{padding-right:28px}
+
 .ranking-panel{padding:28px 26px 14px}
 .ranking-wrap{border:1px solid var(--line);border-radius:13px;overflow:hidden}
 .table-wrap{width:100%;overflow-x:auto}
