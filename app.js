@@ -514,7 +514,7 @@ function stateHasMeaningfulData(candidate){
 }
 
 async function loadMonth(month){
-  const previousScreen = document.querySelector('.screen.active')?.id || getSavedScreen();
+  const previousScreen = appReady ? (document.querySelector('.screen.active')?.id || getSavedScreen()) : getSavedScreen();
   const targetMonth = month || currentMonth();
 
   const cloudState = await loadFromUpstash(targetMonth);
@@ -577,7 +577,7 @@ async function refreshFromCloud(){
   // Não puxa nuvem enquanto o usuário está digitando em algum campo.
   if(document.activeElement && ['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName)) return;
 
-  const activeScreen = document.querySelector('.screen.active')?.id || 'resultados';
+  const activeScreen = appReady ? (document.querySelector('.screen.active')?.id || getSavedScreen()) : getSavedScreen();
   const month = state.settings?.month || await getCloudCurrentMonth() || currentMonth();
   const cloudState = await loadFromUpstash(month);
 
@@ -762,6 +762,14 @@ function switchScreen(id, persist=true){
   }
 }
 document.querySelectorAll('.nav').forEach(btn=>btn.onclick=()=>switchScreen(btn.dataset.screen));
+
+/* Persistência imediata da aba */
+document.querySelectorAll('.nav').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    if(btn.dataset.screen) setSavedScreen(btn.dataset.screen);
+  });
+});
+
 
 function closeTooltipItems(){
   document.querySelectorAll('.tooltip-item').forEach(item=>{
