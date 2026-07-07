@@ -1439,6 +1439,8 @@ function setRegisterAccess(locked){
   registrationLocked = !!locked;
 
   if(showRegister){
+    // Começa oculto no HTML para evitar o "pulo" visual.
+    // Só aparece se a API confirmar que ainda não existe usuário principal.
     showRegister.hidden = registrationLocked;
     showRegister.disabled = registrationLocked;
     showRegister.setAttribute('aria-hidden', String(registrationLocked));
