@@ -1,6 +1,6 @@
 const crypto = require('crypto');
 
-const PREFIX = process.env.APP_STORAGE_PREFIX || 'farmais-tiete:metas-vendas';
+const PREFIX = 'farmais-tiete:metas-vendas:reset-2026-07-07';
 
 function send(res, status, body) {
   res.statusCode = status;

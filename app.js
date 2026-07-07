@@ -31,6 +31,19 @@ function parseVal(v){
 
 const AUTH_SESSION_KEY = 'farmaisAuthSession';
 
+/* Reset total do sistema - reset-2026-07-07
+   Usa um novo namespace local para iniciar tudo limpo.
+   As chaves antigas não são usadas por esta versão. */
+try{
+  localStorage.removeItem('farmaisAuthSession');
+  Object.keys(localStorage).forEach((key)=>{
+    if(key.startsWith('metasVendasSite:') && !key.startsWith('metasVendasSite:reset-2026-07-07:')){
+      localStorage.removeItem(key);
+    }
+  });
+}catch{}
+
+
 /* Sessão por aba:
    - F5 mantém o login.
    - Fechar a aba encerra a sessão automaticamente.
@@ -198,7 +211,7 @@ const defaultState = {
   updatedAt:null
 };
 
-const STORAGE_PREFIX = 'metasVendasSite';
+const STORAGE_PREFIX = 'metasVendasSite:reset-2026-07-07';
 function currentMonthKey(username=getCurrentUsername()){
   return `${STORAGE_PREFIX}:currentMonth:${username}`;
 }
@@ -360,12 +373,36 @@ function loadInitial(){
 let cloudSaveTimer = null;
 let cloudAutoSyncTimer = null;
 let lastCloudSavedAt = 0;
+let lastCloudReadAt = 0;
+let lastCloudFingerprint = '';
+let lastCloudCurrentMonth = null;
 let cloudReady = false;
 let appReady = false;
+let cloudDirty = false;
+let cloudSaveInFlight = false;
+let cloudPendingSave = false;
+let cloudRefreshInFlight = false;
+
+const CLOUD_SAVE_DELAY_MS = 2500;
+const CLOUD_COMMIT_DELAY_MS = 1200;
+const CLOUD_REFRESH_INTERVAL_MS = 120000;
+const CLOUD_REFRESH_MIN_GAP_MS = 60000;
+
 let state = loadInitial();
 
+function cloudFingerprint(){
+  try{
+    return JSON.stringify(state, (key, value) => key === 'updatedAt' ? undefined : value);
+  }catch{
+    return '';
+  }
+}
+
 function saveLocal(touch=true){
-  if(touch) state.updatedAt = new Date().toISOString();
+  if(touch){
+    state.updatedAt = new Date().toISOString();
+    cloudDirty = true;
+  }
   localStorage.setItem(currentMonthKey(), state.settings.month);
   localStorage.setItem(storageKey(state.settings.month), JSON.stringify(state));
 }
@@ -416,7 +453,9 @@ async function apiCurrentMonth(method='GET', month=null){
 async function getCloudCurrentMonth(){
   try{
     const response = await apiCurrentMonth('GET');
-    return response && response.currentMonth ? response.currentMonth : null;
+    const month = response && response.currentMonth ? response.currentMonth : null;
+    if(month) lastCloudCurrentMonth = month;
+    return month;
   }catch{
     return null;
   }
@@ -424,7 +463,9 @@ async function getCloudCurrentMonth(){
 
 async function setCloudCurrentMonth(month){
   try{
-    if(month) await apiCurrentMonth('POST', month);
+    if(!month || month === lastCloudCurrentMonth) return;
+    await apiCurrentMonth('POST', month);
+    lastCloudCurrentMonth = month;
   }catch{}
 }
 
@@ -446,17 +487,35 @@ async function saveToUpstash(force=false){
   // quando a página é recarregada antes de terminar o carregamento.
   if(!appReady && !force) return;
 
+  const fingerprint = cloudFingerprint();
+  if(!force && (!cloudDirty || fingerprint === lastCloudFingerprint)) return;
+
+  if(cloudSaveInFlight){
+    cloudPendingSave = true;
+    return;
+  }
+
+  cloudSaveInFlight = true;
   try{
     state.updatedAt = new Date().toISOString();
     localStorage.setItem(currentMonthKey(), state.settings.month);
     localStorage.setItem(storageKey(state.settings.month), JSON.stringify(state));
 
     await apiRequest('POST', state.settings.month, state);
+    lastCloudFingerprint = cloudFingerprint();
+    cloudDirty = false;
+
     await setCloudCurrentMonth(state.settings.month);
     lastCloudSavedAt = Date.now();
     cloudReady = true;
   }catch(err){
     console.warn('Não foi possível salvar no Upstash agora:', err.message);
+  }finally{
+    cloudSaveInFlight = false;
+    if(cloudPendingSave){
+      cloudPendingSave = false;
+      scheduleCloudSave(1000);
+    }
   }
 }
 
@@ -467,16 +526,17 @@ async function saveNowToCloud(){
   await saveToUpstash();
 }
 
-function scheduleCloudSave(){
+function scheduleCloudSave(delay=CLOUD_SAVE_DELAY_MS){
   if(getCurrentUsername() === 'sem-login') return;
+  if(!cloudDirty) return;
+
   clearTimeout(cloudSaveTimer);
 
-  // No celular, timers podem atrasar ao trocar de aba/app.
-  // Por isso o salvamento fica mais rápido.
+  // Agrupa várias digitações em um único salvamento na nuvem.
   cloudSaveTimer = setTimeout(async ()=>{
     cloudSaveTimer = null;
     await saveToUpstash();
-  }, 350);
+  }, delay);
 }
 
 function save(){
@@ -486,15 +546,15 @@ function save(){
 }
 
 window.addEventListener('beforeunload', ()=>{
-  if(getCurrentUsername() !== 'sem-login') saveToUpstash();
+  if(getCurrentUsername() !== 'sem-login' && cloudDirty) saveToUpstash();
 });
 
 window.addEventListener('pagehide', ()=>{
-  if(getCurrentUsername() !== 'sem-login') saveToUpstash();
+  if(getCurrentUsername() !== 'sem-login' && cloudDirty) saveToUpstash();
 });
 
 document.addEventListener('visibilitychange', ()=>{
-  if(document.hidden && getCurrentUsername() !== 'sem-login'){
+  if(document.hidden && getCurrentUsername() !== 'sem-login' && cloudDirty){
     saveNowToCloud();
   }
 });
@@ -550,6 +610,9 @@ async function loadMonth(month){
   state = selectedState;
   ensureDays();
   saveLocal(false);
+  lastCloudFingerprint = cloudFingerprint();
+  cloudDirty = !!shouldSendLocalToCloud;
+
   renderAll();
   switchScreen(previousScreen, false);
   finishAppBoot();
@@ -570,29 +633,41 @@ async function initCloudSync(){
 }
 
 
-async function refreshFromCloud(){
+async function refreshFromCloud(force=false){
   if(getCurrentUsername() === 'sem-login') return;
-  if(cloudSaveTimer) return;
-  if(Date.now() - lastCloudSavedAt < 1200) return;
+  if(document.hidden && !force) return;
+  if(cloudRefreshInFlight) return;
+  if(cloudSaveTimer || cloudSaveInFlight || cloudDirty) return;
+  if(Date.now() - lastCloudSavedAt < 5000) return;
+  if(!force && Date.now() - lastCloudReadAt < CLOUD_REFRESH_MIN_GAP_MS) return;
 
   // Não puxa nuvem enquanto o usuário está digitando em algum campo.
   if(document.activeElement && ['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName)) return;
 
-  const activeScreen = appReady ? (document.querySelector('.screen.active')?.id || getSavedScreen()) : getSavedScreen();
-  const month = state.settings?.month || await getCloudCurrentMonth() || currentMonth();
-  const cloudState = await loadFromUpstash(month);
+  cloudRefreshInFlight = true;
+  lastCloudReadAt = Date.now();
 
-  if(!cloudState) return;
+  try{
+    const activeScreen = appReady ? (document.querySelector('.screen.active')?.id || getSavedScreen()) : getSavedScreen();
+    const month = state.settings?.month || await getCloudCurrentMonth() || currentMonth();
+    const cloudState = await loadFromUpstash(month);
 
-  const localTime = state.updatedAt ? Date.parse(state.updatedAt) : 0;
-  const cloudTime = cloudState.updatedAt ? Date.parse(cloudState.updatedAt) : 0;
+    if(!cloudState) return;
 
-  if(cloudTime > localTime){
-    state = cloudState;
-    ensureDays();
-    saveLocal(false);
-    renderAll();
-    switchScreen(activeScreen);
+    const localTime = state.updatedAt ? Date.parse(state.updatedAt) : 0;
+    const cloudTime = cloudState.updatedAt ? Date.parse(cloudState.updatedAt) : 0;
+
+    if(cloudTime > localTime){
+      state = cloudState;
+      ensureDays();
+      saveLocal(false);
+      lastCloudFingerprint = cloudFingerprint();
+      cloudDirty = false;
+      renderAll();
+      switchScreen(activeScreen);
+    }
+  }finally{
+    cloudRefreshInFlight = false;
   }
 }
 
@@ -602,9 +677,9 @@ function handleCloudCommitFromField(event){
   if(!target || !target.matches || !target.matches('input, select, textarea')) return;
   if(getCurrentUsername() === 'sem-login') return;
 
-  // Garante que alterações feitas no celular sejam enviadas quando o teclado fecha
-  // ou o campo perde foco, mesmo que o timer normal não rode.
-  saveNowToCloud();
+  // No celular, quando o campo perde foco, antecipa o salvamento,
+  // mas ainda agrupa chamadas para não gastar comandos em excesso.
+  scheduleCloudSave(CLOUD_COMMIT_DELAY_MS);
 }
 
 document.addEventListener('change', handleCloudCommitFromField, true);
@@ -613,7 +688,7 @@ document.addEventListener('blur', handleCloudCommitFromField, true);
 function startAutoCloudSync(){
   stopAutoCloudSync();
   if(getCurrentUsername() === 'sem-login') return;
-  cloudAutoSyncTimer = setInterval(()=>refreshFromCloud(), 5000);
+  cloudAutoSyncTimer = setInterval(()=>refreshFromCloud(), CLOUD_REFRESH_INTERVAL_MS);
 }
 
 function stopAutoCloudSync(){
@@ -686,7 +761,7 @@ function ensureDays(){
   });
 
   if(changed){
-    saveLocal();
+    saveLocal(false);
   }
 }
 function recalcEmployeeGoals(){

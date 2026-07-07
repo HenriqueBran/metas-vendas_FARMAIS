@@ -11,7 +11,7 @@ COMO USAR COM UPSTASH
 4. Em Environment Variables, adicione:
    UPSTASH_REDIS_REST_URL
    UPSTASH_REDIS_REST_TOKEN
-   APP_STORAGE_PREFIX=farmais-tiete:metas-vendas
+   APP_STORAGE_PREFIX=farmais-tiete:metas-vendas:reset-2026-07-07
 
 5. Depois de publicar, acesse o link online do sistema.
    Ao alterar o mês em "Metas do mês", o sistema salva e carrega os dados daquele mês separadamente.
@@ -68,3 +68,13 @@ META AUTOMÁTICA
 - Meta individual = Meta do mês x (percentual do funcionário / soma dos percentuais).
 - Meta diária = Meta individual / Dias de trabalho.
 - Ao alterar Meta do mês, Dias de trabalho, Premiação projetada ou Percentual (%), o sistema recalcula automaticamente.
+
+
+RESET TOTAL:
+Esta versão usa um prefixo novo e limpo:
+farmais-tiete:metas-vendas:reset-2026-07-07
+
+Na prática, os usuários, meses, metas, lançamentos e vendas extras antigos não serão carregados.
+Você poderá criar o login novamente e cadastrar tudo do zero.
+
+Observação: os dados antigos podem continuar armazenados no Upstash, mas esta versão não usa mais eles.
